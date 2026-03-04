@@ -305,37 +305,29 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
-  setStatus(`Scanning for offspring of #${parentId}…`);
-
-  try {
-    // Use server-side batch endpoint - much faster!
-    const start = pid + 1;
-    const end = pid + 600;
-    const r = await fetch(`/api/batch?start=${start}&end=${end}&parent=${parentId}`);
-    if (r.ok) {
-      const { children } = await r.json();
-      // Cache each child result so we don't re-fetch later
-      children.forEach(c => cache.set(String(c.token_id), c));
-      return children.map(c => String(c.token_id));
-    }
-  } catch(e) {
-    console.warn('Batch failed, falling back to individual fetches:', e);
-  }
-
-  // Fallback: individual fetches
+  const TOTAL = 800;
+  const CHUNK = 300; // match server chunk size
   const found = [];
-  const scanRange = 600;
-  const ids = Array.from({length: scanRange}, (_, i) => pid + 1 + i);
-  for (let b = 0; b < ids.length; b += 50) {
-    await Promise.all(ids.slice(b, b+50).map(async id => {
-      const d = await fetchChicken(id);
-      if (!d) return;
-      const a = d.attributes || [];
-      const p1 = String(attr(a,'Parent 1')||'0');
-      const p2 = String(attr(a,'Parent 2')||'0');
-      if (p1 === parentId || p2 === parentId) found.push(String(id));
-    }));
-    if (found.length >= 3) break;
+
+  for (let start = pid + 1; start <= pid + TOTAL; start += CHUNK) {
+    const end = Math.min(start + CHUNK - 1, pid + TOTAL);
+    const pct = Math.round(((start - pid) / TOTAL) * 100);
+    setStatus(`Scanning offspring of #${parentId}… ${pct}%`);
+
+    try {
+      const r = await fetch(`/api/batch?start=${start}&end=${end}&parent=${parentId}`);
+      if (r.ok) {
+        const { children } = await r.json();
+        children.forEach(c => {
+          cache.set(String(c.token_id), c);
+          found.push(String(c.token_id));
+        });
+      }
+    } catch(e) {
+      console.warn('Batch chunk failed:', e);
+    }
+
+    if (found.length >= 3) break; // max 3 children per chicken
   }
   return found;
 }
