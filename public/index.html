@@ -311,7 +311,7 @@ async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
   const CHUNK = 200; // match batch.js max of 200
-  const PARALLEL = 5;
+  const PARALLEL = 3; // lower parallelism to avoid Sky Mavis rate limits
   // Scan from first possible child ID up to a safe upper limit
   // New tokens mint slowly so 20000 gives plenty of headroom
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
@@ -369,10 +369,9 @@ function descSubtreeWidth(node) {
 }
 
 function layoutDesc(node, cx, y, role, positions) {
-  if (!node || node.chicken.unknown) return; // skip unknown nodes entirely
+  if (!node || node.chicken.unknown) return;
   const x = cx - NODE_W/2;
   positions.push({ chicken: node.chicken, x, y, role });
-  // Only layout children that have real data
   const validChildren = node.children.filter(c => c && !c.chicken.unknown);
   const childW = validChildren.map(descSubtreeWidth);
   const totalW = childW.reduce((s,w) => s+w+H_GAP, -H_GAP);
@@ -380,12 +379,9 @@ function layoutDesc(node, cx, y, role, positions) {
   validChildren.forEach((child, i) => {
     const ccx = curX + childW[i]/2;
     layoutDesc(child, ccx, y + NODE_H + V_GAP, 'descendant', positions);
-    renderedEdges.push({
-      x1: cx, y1: y + NODE_H,
-      x2: ccx, y2: y + NODE_H + V_GAP
-    });
     curX += childW[i] + H_GAP;
   });
+  // Edges are derived from parent/child IDs after layout, not here
 }
 
 function ancSubtreeWidth(node) {
@@ -395,7 +391,7 @@ function ancSubtreeWidth(node) {
 }
 
 function layoutAnc(node, cx, y, positions) {
-  if (!node || node.chicken.unknown) return; // skip missing/genesis parents
+  if (!node || node.chicken.unknown) return;
   const x = cx - NODE_W/2;
   positions.push({ chicken: node.chicken, x, y, role: 'ancestor' });
   const validParents = node.parents.filter(p => p && !p.chicken.unknown);
@@ -405,12 +401,9 @@ function layoutAnc(node, cx, y, positions) {
   validParents.forEach((par, i) => {
     const pcx = curX + parW[i]/2;
     layoutAnc(par, pcx, y - NODE_H - V_GAP, positions);
-    renderedEdges.push({
-      x1: pcx, y1: y - V_GAP,
-      x2: cx,  y2: y
-    });
     curX += parW[i] + H_GAP;
   });
+  // Edges derived from parent IDs after layout
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────────
@@ -587,25 +580,36 @@ async function explore(id) {
     const validPars = ancTree.parents.filter(p => p && !p.chicken.unknown);
     validPars.forEach((par, i) => {
       const offset = (i - (validPars.length - 1) / 2) * (NODE_W * 2 + H_GAP);
-      const beforeLen = ancPositions.length;
       layoutAnc(par, offset, rootY - NODE_H - V_GAP, ancPositions);
-      // Only draw edge if layoutAnc actually added a node
-      if (ancPositions.length > beforeLen) {
-        renderedEdges.push({
-          x1: offset, y1: rootY - V_GAP,
-          x2: 0,       y2: rootY
-        });
-      }
     });
     positions.push(...ancPositions);
   }
 
-  // Second pass: shift all positions so minimum x = padding
+  // Shift all positions so minimum x = padding
   const PAD = 60;
-  const minX = Math.min(...positions.map(p => p.x));
+  const minX = positions.length ? Math.min(...positions.map(p => p.x)) : PAD;
   const shiftX = PAD - minX;
   positions.forEach(p => p.x += shiftX);
   renderedEdges.forEach(e => { e.x1 += shiftX; e.x2 += shiftX; });
+
+  // Re-derive ALL edges from the final shifted positions using parent/child IDs
+  // This guarantees edges always connect the correct nodes
+  const posMap = new Map(positions.map(p => [p.chicken.id, p]));
+  renderedEdges = [];
+  positions.forEach(p => {
+    const c = p.chicken;
+    if (c.unknown) return;
+    // Draw edge FROM each parent TO this node
+    [c.parent1, c.parent2].forEach(pid => {
+      if (pid && pid !== '0' && posMap.has(pid)) {
+        const par = posMap.get(pid);
+        renderedEdges.push({
+          x1: par.x + NODE_W/2, y1: par.y + NODE_H,
+          x2: p.x   + NODE_W/2, y2: p.y
+        });
+      }
+    });
+  });
 
   renderAll(positions);
   document.getElementById('search-btn').disabled = false;
