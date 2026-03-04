@@ -248,15 +248,11 @@ async function fetchChicken(id) {
   const k = String(id);
   if (cache.has(k)) return cache.get(k);
   try {
-    const r = await fetch(
-      `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/0x322b3d98ddbd589dc2e8dd83659bb069828231e0/tokens/${id}`,
-      { headers: { 'X-API-Key': 'l62lam6Dt5AyU7zO6H7fK0Czz58bcPYq' } }
-    );
+    // Use Chicken Saga's own proxy - no CORS issues, no rate limits
+    const r = await fetch(`https://app.chickensaga.com/api/proxy?tokenId=${id}`);
     if (!r.ok) { cache.set(k, null); return null; }
-    const json = await r.json();
-    const item = json?.result?.token ?? json?.result ?? json;
-    const meta = item?.metadata ?? item;
-    const d = { token_id: k, image: meta?.image || '', attributes: meta?.attributes || [] };
+    const d = await r.json();
+    if (!d || !d.attributes) { cache.set(k, null); return null; }
     cache.set(k, d);
     return d;
   } catch { cache.set(k, null); return null; }
