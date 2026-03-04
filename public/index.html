@@ -313,7 +313,7 @@ async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
   const CHUNK    = 30;  // 30 IDs per batch call, all parallel server-side (~300ms per call)
-  const PARALLEL = 10;  // 10 batch calls at once from browser
+  const PARALLEL = 3;   // 3 batch calls at once = 90 simultaneous Sky Mavis calls (safe rate)
 
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
@@ -424,7 +424,8 @@ function renderAll(positions) {
   const xs = positions.map(p=>p.x), ys = positions.map(p=>p.y);
   const ex = renderedEdges.flatMap(e=>[e.x1,e.x2]);
   const ey = renderedEdges.flatMap(e=>[e.y1,e.y2]);
-  const allX = [...xs, ...ex], allY = [...ys, ...ey];
+  const allX = xs.length ? [...xs, ...ex] : [0];
+  const allY = ys.length ? [...ys, ...ey] : [0];
   const minX = Math.min(...allX)-200, minY = Math.min(...allY)-200;
   const maxX = Math.max(...allX)+300, maxY = Math.max(...allY)+200;
   const svgW = maxX-minX, svgH = maxY-minY;
