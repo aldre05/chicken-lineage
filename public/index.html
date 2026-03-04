@@ -582,20 +582,16 @@ async function explore(id) {
 
   const maxDepth = parseInt(document.getElementById('depth-select').value);
   const ANC_DEPTH = Math.min(2, maxDepth);
-  // Only reserve space above root if it actually has known parents
-  const rootData2 = cache.get(String(id));
-  const rootAttrs = rootData2?.attributes || [];
-  const hasParents = rootAttrs.some(a => 
-    (a.trait_type === 'Parent 1' || a.trait_type === 'Parent 2') && 
-    a.value && String(a.value) !== '0'
-  );
-  const rootY = hasParents ? ANC_DEPTH * (NODE_H + V_GAP) + 40 : 40;
   const rootCX = 0;
 
-  // Show root immediately
+  // Fetch root first so we know if it has parents (affects vertical layout)
   setStatus(`Loading #${id}…`);
   const rootData = await fetchChicken(id);
   const rootChicken = parse(rootData, id);
+  const hasParents = rootChicken.parent1 !== '0' || rootChicken.parent2 !== '0';
+  const rootY = hasParents ? ANC_DEPTH * (NODE_H + V_GAP) + 40 : 40;
+
+  // Show root immediately
   renderAll([{ chicken: rootChicken, x: rootCX - NODE_W/2, y: rootY, role: 'root' }]);
 
   // Then load full tree
