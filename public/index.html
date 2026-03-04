@@ -247,21 +247,21 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function fetchChicken(id) {
   const k = String(id);
   if (cache.has(k)) return cache.get(k);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const r = await fetch(`/api/chicken?id=${id}`);
-      if (r.status === 429) {
-        await sleep(2000 * (attempt + 1)); // wait 2s, 4s, 6s
-        continue;
-      }
-      if (!r.ok) { cache.set(k, null); return null; }
-      const d = await r.json();
-      cache.set(k, d);
-      return d;
-    } catch { cache.set(k, null); return null; }
-  }
-  cache.set(k, null);
-  return null;
+  const CONTRACT = '0x322b3d98ddbd589dc2e8dd83659bb069828231e0';
+  const API_KEY  = 'l62lam6Dt5AyU7zO6H7fK0Czz58bcPYq';
+  try {
+    const r = await fetch(
+      `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/${CONTRACT}/tokens/${id}`,
+      { headers: { 'X-API-Key': API_KEY } }
+    );
+    if (!r.ok) { cache.set(k, null); return null; }
+    const json = await r.json();
+    const item = json?.result?.token ?? json?.result ?? json;
+    const meta = item?.metadata ?? item;
+    const d = { token_id: k, image: meta?.image || '', attributes: meta?.attributes || [] };
+    cache.set(k, d);
+    return d;
+  } catch { cache.set(k, null); return null; }
 }
 
 function attr(attrs, name) {
