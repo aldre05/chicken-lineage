@@ -1,6 +1,0 @@
-{
-  "outputDirectory": "public",
-  "rewrites": [
-    { "source": "/api/chicken", "destination": "/api/chicken.js" }
-  ]
-}
