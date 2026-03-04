@@ -293,43 +293,87 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
   const node = { chicken, children: [] };
 
   if (depth < maxDepth && !chicken.unknown) {
-    setStatus(`Scanning children of #${id}…`);
+    const gen = depth === 0 ? 'children' : depth === 1 ? 'grandchildren' : `gen-${depth+1} descendants`;
     const childIds = await findChildren(k);
-    const kids = await Promise.all(
-      childIds.map(cid => buildDescTree(cid, depth+1, maxDepth, visited))
-    );
-    node.children = kids.filter(Boolean);
+    if (childIds.length > 0) {
+      setStatus(`Found ${childIds.length} ${gen} of #${id}, scanning their offspring…`);
+      // Scan each child's children sequentially to avoid overwhelming the API
+      for (const cid of childIds) {
+        const child = await buildDescTree(cid, depth+1, maxDepth, visited);
+        if (child) node.children.push(child);
+      }
+    }
   }
   return node;
 }
 
+async function getLatestTokenId() {
+  // Binary search for the latest minted token ID
+  let lo = 11111, hi = 20000;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    try {
+      const r = await fetch(`/api/chicken?id=${mid}`);
+      const d = await r.json();
+      if (d && !d.error && d.attributes) { lo = mid; } else { hi = mid - 1; }
+    } catch { hi = mid - 1; }
+  }
+  return lo;
+}
+
+let latestTokenId = null;
+
+async function getLatestTokenId() {
+  if (latestTokenId) return latestTokenId;
+  // Binary search for the latest minted token ID
+  let lo = 11111, hi = 25000;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    try {
+      const r = await fetch(`/api/chicken?id=${mid}`);
+      const d = await r.json();
+      if (d && !d.error && d.attributes && d.attributes.length > 0) { lo = mid; } 
+      else { hi = mid - 1; }
+    } catch { hi = mid - 1; }
+  }
+  latestTokenId = lo;
+  return lo;
+}
+
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
-  const TOTAL = 800;
-  const CHUNK = 300; // match server chunk size
   const found = [];
+  const CHUNK = 300;
+  const PARALLEL = 5;
 
-  for (let start = pid + 1; start <= pid + TOTAL; start += CHUNK) {
-    const end = Math.min(start + CHUNK - 1, pid + TOTAL);
-    const pct = Math.round(((start - pid) / TOTAL) * 100);
-    setStatus(`Scanning offspring of #${parentId}… ${pct}%`);
+  const latest = await getLatestTokenId();
+  const scanStart = pid >= 11111 ? pid + 1 : 1;
 
-    try {
-      const r = await fetch(`/api/batch?start=${start}&end=${end}&parent=${parentId}`);
-      if (r.ok) {
-        const { children } = await r.json();
-        children.forEach(c => {
-          cache.set(String(c.token_id), c);
-          found.push(String(c.token_id));
-        });
-      }
-    } catch(e) {
-      console.warn('Batch chunk failed:', e);
-    }
-
-    if (found.length >= 3) break; // max 3 children per chicken
+  const chunks = [];
+  for (let s = scanStart; s <= latest; s += CHUNK) {
+    chunks.push([s, Math.min(s + CHUNK - 1, latest)]);
   }
-  return found;
+
+  for (let i = 0; i < chunks.length; i += PARALLEL) {
+    const pct = Math.round((i / chunks.length) * 100);
+    setStatus(`Scanning #${parentId} offspring… ${pct}% (${found.length} found)`);
+
+    const batch = chunks.slice(i, i + PARALLEL);
+    const results = await Promise.all(batch.map(async ([start, end]) => {
+      try {
+        const r = await fetch(`/api/batch?parent=${parentId}&start=${start}&end=${end}`);
+        if (!r.ok) return [];
+        const data = await r.json();
+        return data.children || [];
+      } catch { return []; }
+    }));
+
+    results.flat().forEach(c => {
+      cache.set(String(c.token_id), c);
+      found.push(String(c.token_id));
+    });
+  }
+  return found; // no artificial limit - return ALL children found
 }
 
 async function buildAncTree(id, depth, maxDepth) {
