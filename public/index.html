@@ -416,11 +416,11 @@ function roleColor(role) {
 }
 
 function renderAll(positions) {
+  if (!positions.length) return; // nothing to render
   const scene = document.getElementById('scene');
   scene.innerHTML = '';
 
   const svg = document.getElementById('connectors');
-  // size svg to cover everything
   const xs = positions.map(p=>p.x), ys = positions.map(p=>p.y);
   const ex = renderedEdges.flatMap(e=>[e.x1,e.x2]);
   const ey = renderedEdges.flatMap(e=>[e.y1,e.y2]);
@@ -554,10 +554,7 @@ async function explore(id) {
   const hasParents = rootChicken.parent1 !== '0' || rootChicken.parent2 !== '0';
   const rootY = hasParents ? ANC_DEPTH * (NODE_H + V_GAP) + 40 : 40;
 
-  // Show root immediately
-  renderAll([{ chicken: rootChicken, x: rootCX - NODE_W/2, y: rootY, role: 'root' }]);
-
-  // Then load full tree
+  // Load full tree
   setStatus(`Finding descendants of #${id}…`);
   const descTree = await buildDescTree(id, 0, maxDepth);
 
