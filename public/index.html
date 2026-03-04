@@ -310,10 +310,9 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK = 200; // match batch.js max of 200
-  const PARALLEL = 3; // lower parallelism to avoid Sky Mavis rate limits
-  // Scan from first possible child ID up to a safe upper limit
-  // New tokens mint slowly so 20000 gives plenty of headroom
+  const CHUNK = 50;    // 50 IDs per server call, all fully parallel
+  const PARALLEL = 10; // 10 chunks simultaneously = 500 IDs checked at once
+
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
 
@@ -336,14 +335,11 @@ async function findChildren(parentId) {
       } catch { return []; }
     }));
 
-    const newFound = results.flat();
-    newFound.forEach(c => {
+    results.flat().forEach(c => {
       cache.set(String(c.token_id), c);
       found.push(String(c.token_id));
     });
-    if (newFound.length > 0) console.log(`[batch chunk ${i}] found:`, newFound.map(c=>c.token_id));
   }
-  console.log(`[findChildren #${parentId}] total found: ${found.length}`, found);
   return found;
 }
 
