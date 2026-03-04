@@ -423,15 +423,16 @@ function ancSubtreeWidth(node) {
 }
 
 function layoutAnc(node, cx, y, positions) {
+  if (!node || node.chicken.unknown) return; // skip missing/genesis parents
   const x = cx - NODE_W/2;
   positions.push({ chicken: node.chicken, x, y, role: 'ancestor' });
-  const parW = node.parents.map(ancSubtreeWidth);
+  const validParents = node.parents.filter(p => p && !p.chicken.unknown);
+  const parW = validParents.map(ancSubtreeWidth);
   const totalW = parW.reduce((s,w) => s+w+H_GAP, -H_GAP);
-  let curX = cx - totalW/2;
-  node.parents.forEach((par, i) => {
+  let curX = cx - (totalW > 0 ? totalW/2 : 0);
+  validParents.forEach((par, i) => {
     const pcx = curX + parW[i]/2;
     layoutAnc(par, pcx, y - NODE_H - V_GAP, positions);
-    // Edge from parent bottom-center to child top-center
     renderedEdges.push({
       x1: pcx, y1: y - V_GAP,
       x2: cx,  y2: y
@@ -581,7 +582,14 @@ async function explore(id) {
 
   const maxDepth = parseInt(document.getElementById('depth-select').value);
   const ANC_DEPTH = Math.min(2, maxDepth);
-  const rootY = ANC_DEPTH * (NODE_H + V_GAP) + 40;
+  // Only reserve space above root if it actually has known parents
+  const rootData2 = cache.get(String(id));
+  const rootAttrs = rootData2?.attributes || [];
+  const hasParents = rootAttrs.some(a => 
+    (a.trait_type === 'Parent 1' || a.trait_type === 'Parent 2') && 
+    a.value && String(a.value) !== '0'
+  );
+  const rootY = hasParents ? ANC_DEPTH * (NODE_H + V_GAP) + 40 : 40;
   const rootCX = 0;
 
   // Show root immediately
