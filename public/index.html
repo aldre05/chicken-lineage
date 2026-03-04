@@ -248,11 +248,9 @@ async function fetchChicken(id) {
   const k = String(id);
   if (cache.has(k)) return cache.get(k);
   try {
-    // Use Chicken Saga's own proxy - no CORS issues, no rate limits
-    const r = await fetch(`https://app.chickensaga.com/api/proxy?tokenId=${id}`);
+    const r = await fetch(`/api/chicken?id=${id}`);
     if (!r.ok) { cache.set(k, null); return null; }
     const d = await r.json();
-    if (!d || !d.attributes) { cache.set(k, null); return null; }
     cache.set(k, d);
     return d;
   } catch { cache.set(k, null); return null; }
