@@ -336,11 +336,14 @@ async function findChildren(parentId) {
       } catch { return []; }
     }));
 
-    results.flat().forEach(c => {
+    const newFound = results.flat();
+    newFound.forEach(c => {
       cache.set(String(c.token_id), c);
       found.push(String(c.token_id));
     });
+    if (newFound.length > 0) console.log(`[batch chunk ${i}] found:`, newFound.map(c=>c.token_id));
   }
+  console.log(`[findChildren #${parentId}] total found: ${found.length}`, found);
   return found;
 }
 
