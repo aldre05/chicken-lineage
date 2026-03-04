@@ -9,17 +9,17 @@ module.exports = async function handler(req, res) {
   const API_KEY  = 'l62lam6Dt5AyU7zO6H7fK0Czz58bcPYq';
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
-  const endId    = Math.min(parseInt(end) || startId + 49, startId + 49); // 50 IDs max
+  const endId    = Math.min(parseInt(end) || startId + 29, startId + 29); // exactly 30 IDs
 
   const ids = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
-  const fetchOne = async (id) => {
+  // All 30 IDs fully in parallel - completes in ~300ms well under Vercel's 10s limit
+  const results = await Promise.allSettled(ids.map(async (id) => {
     try {
-      const url = `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/${CONTRACT}/tokens/${id}`;
-      const r = await fetch(url, {
-        headers: { 'X-API-Key': API_KEY },
-        signal: AbortSignal.timeout(3000) // short timeout - fail fast
-      });
+      const r = await fetch(
+        `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/${CONTRACT}/tokens/${id}`,
+        { headers: { 'X-API-Key': API_KEY }, signal: AbortSignal.timeout(5000) }
+      );
       if (!r.ok) return null;
       const json = await r.json();
       const item = json?.result?.token ?? json?.result ?? json;
@@ -29,14 +29,9 @@ module.exports = async function handler(req, res) {
       if (getA('Parent 1') !== parentId && getA('Parent 2') !== parentId) return null;
       return { token_id: String(id), image: meta?.image || '', attributes: attrs };
     } catch { return null; }
-  };
+  }));
 
-  // All 50 IDs fully in parallel - should complete in ~3s max
-  const results = await Promise.allSettled(ids.map(fetchOne));
-  const children = results
-    .filter(r => r.status === 'fulfilled' && r.value)
-    .map(r => r.value);
-
+  const children = results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
   res.setHeader('Cache-Control', 's-maxage=300');
   return res.status(200).json({ children, scanned: ids.length });
 }
