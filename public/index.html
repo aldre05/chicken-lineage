@@ -307,20 +307,6 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
   return node;
 }
 
-async function getLatestTokenId() {
-  // Binary search for the latest minted token ID
-  let lo = 11111, hi = 20000;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi + 1) / 2);
-    try {
-      const r = await fetch(`/api/chicken?id=${mid}`);
-      const d = await r.json();
-      if (d && !d.error && d.attributes) { lo = mid; } else { hi = mid - 1; }
-    } catch { hi = mid - 1; }
-  }
-  return lo;
-}
-
 let latestTokenId = null;
 
 async function getLatestTokenId() {
@@ -347,7 +333,7 @@ async function findChildren(parentId) {
   const PARALLEL = 5;
 
   const latest = await getLatestTokenId();
-  const scanStart = pid >= 11111 ? pid + 1 : 1;
+  const scanStart = pid >= 11111 ? pid + 1 : 2223; // tokens start at #2223
 
   const chunks = [];
   for (let s = scanStart; s <= latest; s += CHUNK) {
@@ -605,21 +591,31 @@ async function explore(id) {
 
   renderedEdges = [];
   const positions = [];
-  if (descTree) layoutDesc(descTree, rootCX, rootY, 'root', positions);
+
+  // First pass: layout with rootCX=0 to get relative positions
+  if (descTree) layoutDesc(descTree, 0, rootY, 'root', positions);
   if (positions[0]) positions[0].role = 'root';
 
   if (ancTree && ancTree.parents.length) {
     const ancPositions = [];
     ancTree.parents.forEach((par, i) => {
+      if (!par || par.chicken.unknown) return;
       const offset = (i - (ancTree.parents.length-1)/2) * (NODE_W * 2 + H_GAP);
-      layoutAnc(par, rootCX + offset, rootY - NODE_H - V_GAP, ancPositions);
+      layoutAnc(par, offset, rootY - NODE_H - V_GAP, ancPositions);
       renderedEdges.push({
-        x1: rootCX + offset, y1: rootY - V_GAP,
-        x2: rootCX,          y2: rootY
+        x1: offset, y1: rootY - V_GAP,
+        x2: 0,       y2: rootY
       });
     });
     positions.push(...ancPositions);
   }
+
+  // Second pass: shift all positions so minimum x = padding
+  const PAD = 60;
+  const minX = Math.min(...positions.map(p => p.x));
+  const shiftX = PAD - minX;
+  positions.forEach(p => p.x += shiftX);
+  renderedEdges.forEach(e => { e.x1 += shiftX; e.x2 += shiftX; });
 
   renderAll(positions);
   document.getElementById('search-btn').disabled = false;
