@@ -310,7 +310,7 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK = 300;
+  const CHUNK = 200; // match batch.js max of 200
   const PARALLEL = 5;
   // Scan from first possible child ID up to a safe upper limit
   // New tokens mint slowly so 20000 gives plenty of headroom
@@ -361,21 +361,25 @@ async function buildAncTree(id, depth, maxDepth) {
 
 // ── Layout ─────────────────────────────────────────────────────────────────────
 function descSubtreeWidth(node) {
-  if (!node.children.length) return NODE_W;
-  const total = node.children.reduce((s,c) => s + descSubtreeWidth(c) + H_GAP, -H_GAP);
+  if (!node || node.chicken.unknown) return NODE_W;
+  const validChildren = node.children.filter(c => c && !c.chicken.unknown);
+  if (!validChildren.length) return NODE_W;
+  const total = validChildren.reduce((s,c) => s + descSubtreeWidth(c) + H_GAP, -H_GAP);
   return Math.max(NODE_W, total);
 }
 
 function layoutDesc(node, cx, y, role, positions) {
+  if (!node || node.chicken.unknown) return; // skip unknown nodes entirely
   const x = cx - NODE_W/2;
   positions.push({ chicken: node.chicken, x, y, role });
-  const childW = node.children.map(descSubtreeWidth);
+  // Only layout children that have real data
+  const validChildren = node.children.filter(c => c && !c.chicken.unknown);
+  const childW = validChildren.map(descSubtreeWidth);
   const totalW = childW.reduce((s,w) => s+w+H_GAP, -H_GAP);
-  let curX = cx - totalW/2;
-  node.children.forEach((child, i) => {
+  let curX = cx - (totalW > 0 ? totalW/2 : 0);
+  validChildren.forEach((child, i) => {
     const ccx = curX + childW[i]/2;
     layoutDesc(child, ccx, y + NODE_H + V_GAP, 'descendant', positions);
-    // Edge from parent bottom-center to child top-center
     renderedEdges.push({
       x1: cx, y1: y + NODE_H,
       x2: ccx, y2: y + NODE_H + V_GAP
