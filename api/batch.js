@@ -9,7 +9,7 @@ module.exports = async function handler(req, res) {
   const API_KEY  = 'l62lam6Dt5AyU7zO6H7fK0Czz58bcPYq';
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
-  const endId    = Math.min(parseInt(end) || startId + 99, startId + 199); // max 200 per call
+  const endId    = Math.min(parseInt(end) || startId + 49, startId + 49); // 50 IDs max
 
   const ids = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
@@ -18,7 +18,7 @@ module.exports = async function handler(req, res) {
       const url = `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/${CONTRACT}/tokens/${id}`;
       const r = await fetch(url, {
         headers: { 'X-API-Key': API_KEY },
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(3000) // short timeout - fail fast
       });
       if (!r.ok) return null;
       const json = await r.json();
@@ -31,12 +31,11 @@ module.exports = async function handler(req, res) {
     } catch { return null; }
   };
 
-  // Run in sub-batches of 20 to avoid overwhelming Sky Mavis rate limits
-  const children = [];
-  for (let b = 0; b < ids.length; b += 20) {
-    const results = await Promise.allSettled(ids.slice(b, b + 20).map(fetchOne));
-    results.forEach(r => r.status === 'fulfilled' && r.value && children.push(r.value));
-  }
+  // All 50 IDs fully in parallel - should complete in ~3s max
+  const results = await Promise.allSettled(ids.map(fetchOne));
+  const children = results
+    .filter(r => r.status === 'fulfilled' && r.value)
+    .map(r => r.value);
 
   res.setHeader('Cache-Control', 's-maxage=300');
   return res.status(200).json({ children, scanned: ids.length });
