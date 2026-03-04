@@ -204,6 +204,7 @@ const cache = new Map();
 let rootId = null;
 let renderedNodes = []; // {id, x, y, role}
 let renderedEdges = []; // {x1,y1,x2,y2}
+let liveRootNode = null;
 
 // ── Pan/Zoom ───────────────────────────────────────────────────────────────────
 let panX = 0, panY = 0, scale = 1;
@@ -247,13 +248,21 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function fetchChicken(id) {
   const k = String(id);
   if (cache.has(k)) return cache.get(k);
-  try {
-    const r = await fetch(`/api/chicken?id=${id}`);
-    if (!r.ok) { cache.set(k, null); return null; }
-    const d = await r.json();
-    cache.set(k, d);
-    return d;
-  } catch { cache.set(k, null); return null; }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(`/api/chicken?id=${id}`);
+      if (r.status === 429) {
+        await sleep(2000 * (attempt + 1)); // wait 2s, 4s, 6s
+        continue;
+      }
+      if (!r.ok) { cache.set(k, null); return null; }
+      const d = await r.json();
+      cache.set(k, d);
+      return d;
+    } catch { cache.set(k, null); return null; }
+  }
+  cache.set(k, null);
+  return null;
 }
 
 function attr(attrs, name) {
@@ -287,6 +296,31 @@ function parse(data, id) {
 }
 
 // ── Tree building ──────────────────────────────────────────────────────────────
+// Live positions and edges — updated as tree builds
+let livePositions = [];
+let liveRootY = 40;
+
+function renderLive() {
+  if (!livePositions.length) return;
+  // Re-derive edges from current positions
+  const posMap = new Map(livePositions.map(p => [p.chicken.id, p]));
+  renderedEdges = [];
+  livePositions.forEach(p => {
+    const c = p.chicken;
+    if (c.unknown) return;
+    [c.parent1, c.parent2].forEach(pid => {
+      if (pid && pid !== '0' && posMap.has(pid)) {
+        const par = posMap.get(pid);
+        renderedEdges.push({
+          x1: par.x + NODE_W/2, y1: par.y + NODE_H,
+          x2: p.x   + NODE_W/2, y2: p.y
+        });
+      }
+    });
+  });
+  renderAll(livePositions);
+}
+
 async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
   const k = String(id);
   if (visited.has(k)) return null;
@@ -301,10 +335,20 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
     const childIds = await findChildren(k);
     if (childIds.length > 0) {
       setStatus(`Found ${childIds.length} ${gen} of #${id}, scanning their offspring…`);
-      // Scan each child's children sequentially to avoid overwhelming the API
       for (const cid of childIds) {
         const child = await buildDescTree(cid, depth+1, maxDepth, visited);
-        if (child) node.children.push(child);
+        if (child) {
+          node.children.push(child);
+          // Re-layout and re-render immediately when a new child is found
+          livePositions = [];
+          layoutDesc(liveRootNode, 0, liveRootY, 'root', livePositions);
+          if (livePositions[0]) livePositions[0].role = 'root';
+          const PAD = 60;
+          const minX = Math.min(...livePositions.map(p => p.x));
+          const shiftX = PAD - minX;
+          livePositions.forEach(p => p.x += shiftX);
+          renderLive();
+        }
       }
     }
   }
@@ -314,9 +358,8 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK    = 30;  // 30 IDs per batch call, all parallel server-side (~300ms per call)
-  const PARALLEL = 3;   // 3 batch calls at once = 90 simultaneous Sky Mavis calls (safe rate)
-
+  const CHUNK    = 30;
+  const PARALLEL = 3;
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
 
@@ -325,9 +368,18 @@ async function findChildren(parentId) {
     chunks.push([s, Math.min(s + CHUNK - 1, scanEnd)]);
   }
 
+  const total = chunks.length;
+  const startTime = Date.now();
+
   for (let i = 0; i < chunks.length; i += PARALLEL) {
-    const pct = Math.round((i / chunks.length) * 100);
-    setStatus(`Scanning #${parentId} offspring… ${pct}% (${found.length} found)`);
+    const pct = Math.round((i / total) * 100);
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = i / (elapsed || 1);
+    const remaining = rate > 0 ? Math.round((total - i) / rate) : '?';
+    const eta = remaining === '?' ? '' : remaining < 60
+      ? ` · ~${remaining}s left`
+      : ` · ~${Math.round(remaining/60)}m left`;
+    setStatus(`Scanning #${parentId}… ${pct}%${eta} — ${found.length} found`);
 
     await Promise.all(chunks.slice(i, i + PARALLEL).map(async ([start, end]) => {
       try {
@@ -550,15 +602,23 @@ async function explore(id) {
   const ANC_DEPTH = Math.min(2, maxDepth);
   const rootCX = 0;
 
-  // Fetch root first so we know if it has parents (affects vertical layout)
+  // Fetch root first and show immediately
   setStatus(`Loading #${id}…`);
   const rootData = await fetchChicken(id);
   const rootChicken = parse(rootData, id);
   const hasParents = rootChicken.parent1 !== '0' || rootChicken.parent2 !== '0';
   const rootY = hasParents ? ANC_DEPTH * (NODE_H + V_GAP) + 40 : 40;
 
-  // Load full tree
-  setStatus(`Finding descendants of #${id}…`);
+  // Show root immediately
+  liveRootY = rootY;
+  renderedEdges = [];
+  const rootPos = { chicken: rootChicken, x: 60, y: rootY, role: 'root' };
+  renderAll([rootPos]);
+
+  // Build desc tree - renders live as children are found
+  setStatus(`Scanning descendants of #${id}…`);
+  liveRootNode = { chicken: rootChicken, children: [] };
+  livePositions = [rootPos];
   const descTree = await buildDescTree(id, 0, maxDepth);
 
   setStatus(`Finding ancestors of #${id}…`);
@@ -566,10 +626,9 @@ async function explore(id) {
 
   clearStatus();
 
+  // Final full render with ancestors included
   renderedEdges = [];
   const positions = [];
-
-  // First pass: layout with rootCX=0 to get relative positions
   if (descTree) layoutDesc(descTree, 0, rootY, 'root', positions);
   if (positions[0]) positions[0].role = 'root';
 
@@ -583,21 +642,16 @@ async function explore(id) {
     positions.push(...ancPositions);
   }
 
-  // Shift all positions so minimum x = padding
   const PAD = 60;
   const minX = positions.length ? Math.min(...positions.map(p => p.x)) : PAD;
   const shiftX = PAD - minX;
   positions.forEach(p => p.x += shiftX);
-  renderedEdges.forEach(e => { e.x1 += shiftX; e.x2 += shiftX; });
 
-  // Re-derive ALL edges from the final shifted positions using parent/child IDs
-  // This guarantees edges always connect the correct nodes
   const posMap = new Map(positions.map(p => [p.chicken.id, p]));
   renderedEdges = [];
   positions.forEach(p => {
     const c = p.chicken;
     if (c.unknown) return;
-    // Draw edge FROM each parent TO this node
     [c.parent1, c.parent2].forEach(pid => {
       if (pid && pid !== '0' && posMap.has(pid)) {
         const par = posMap.get(pid);
