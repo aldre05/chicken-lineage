@@ -242,16 +242,26 @@ function centerOn(x, y) {
 }
 
 // ── API ────────────────────────────────────────────────────────────────────────
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function fetchChicken(id) {
   const k = String(id);
   if (cache.has(k)) return cache.get(k);
-  try {
-    const r = await fetch(`/api/chicken?id=${id}`);
-    if (!r.ok) { cache.set(k, null); return null; }
-    const d = await r.json();
-    cache.set(k, d);
-    return d;
-  } catch { cache.set(k, null); return null; }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(`/api/chicken?id=${id}`);
+      if (r.status === 429) {
+        await sleep(2000 * (attempt + 1)); // wait 2s, 4s, 6s
+        continue;
+      }
+      if (!r.ok) { cache.set(k, null); return null; }
+      const d = await r.json();
+      cache.set(k, d);
+      return d;
+    } catch { cache.set(k, null); return null; }
+  }
+  cache.set(k, null);
+  return null;
 }
 
 function attr(attrs, name) {
