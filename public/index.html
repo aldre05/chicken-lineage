@@ -243,7 +243,15 @@ function centerOn(x, y) {
 
 // ── API ────────────────────────────────────────────────────────────────────────
 async function fetchChicken(id) {
-  return fetchChickenDirect(id);
+  const k = String(id);
+  if (cache.has(k)) return cache.get(k);
+  try {
+    const r = await fetch(`/api/chicken?id=${id}`);
+    if (!r.ok) { cache.set(k, null); return null; }
+    const d = await r.json();
+    cache.set(k, d);
+    return d;
+  } catch { cache.set(k, null); return null; }
 }
 
 function attr(attrs, name) {
@@ -301,45 +309,34 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
   return node;
 }
 
-const CONTRACT = '0x322b3d98ddbd589dc2e8dd83659bb069828231e0';
-const API_KEY  = 'l62lam6Dt5AyU7zO6H7fK0Czz58bcPYq';
-const SM_BASE  = `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/${CONTRACT}/tokens`;
-
-async function fetchChickenDirect(id) {
-  const k = String(id);
-  if (cache.has(k)) return cache.get(k);
-  try {
-    const r = await fetch(`${SM_BASE}/${id}`, { headers: { 'X-API-Key': API_KEY } });
-    if (!r.ok) { cache.set(k, null); return null; }
-    const json = await r.json();
-    const item = json?.result?.token ?? json?.result ?? json;
-    const meta = item?.metadata ?? item;
-    const data = { token_id: k, image: meta?.image || '', attributes: meta?.attributes || [] };
-    cache.set(k, data);
-    return data;
-  } catch { cache.set(k, null); return null; }
-}
-
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const PARALLEL = 20; // 20 concurrent direct browser requests
+  const CHUNK    = 30;  // 30 IDs per batch call, all parallel server-side (~300ms per call)
+  const PARALLEL = 10;  // 10 batch calls at once from browser
+
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
-  const ids = Array.from({ length: scanEnd - scanStart + 1 }, (_, i) => scanStart + i);
 
-  for (let i = 0; i < ids.length; i += PARALLEL) {
-    if (i % 200 === 0) {
-      const pct = Math.round((i / ids.length) * 100);
-      setStatus(`Scanning #${parentId} offspring… ${pct}% (${found.length} found)`);
-    }
-    await Promise.all(ids.slice(i, i + PARALLEL).map(async id => {
-      const d = await fetchChickenDirect(id);
-      if (!d) return;
-      const a = d.attributes || [];
-      const p1 = String((a.find(x => x.trait_type === 'Parent 1') || {}).value || '0');
-      const p2 = String((a.find(x => x.trait_type === 'Parent 2') || {}).value || '0');
-      if (p1 === parentId || p2 === parentId) found.push(String(id));
+  const chunks = [];
+  for (let s = scanStart; s <= scanEnd; s += CHUNK) {
+    chunks.push([s, Math.min(s + CHUNK - 1, scanEnd)]);
+  }
+
+  for (let i = 0; i < chunks.length; i += PARALLEL) {
+    const pct = Math.round((i / chunks.length) * 100);
+    setStatus(`Scanning #${parentId} offspring… ${pct}% (${found.length} found)`);
+
+    await Promise.all(chunks.slice(i, i + PARALLEL).map(async ([start, end]) => {
+      try {
+        const r = await fetch(`/api/batch?parent=${parentId}&start=${start}&end=${end}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        (data.children || []).forEach(c => {
+          cache.set(String(c.token_id), c);
+          found.push(String(c.token_id));
+        });
+      } catch { /* skip failed chunks */ }
     }));
   }
   return found;
