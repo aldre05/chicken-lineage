@@ -9,20 +9,19 @@ module.exports = async function handler(req, res) {
   const API_KEY  = 'l62lam6Dt5AyU7zO6H7fK0Czz58bcPYq';
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
-  const endId    = Math.min(parseInt(end) || startId + 49, startId + 49); // 50 IDs
+  const endId    = Math.min(parseInt(end) || startId + 49, startId + 49);
+  const sleep    = ms => new Promise(r => setTimeout(r, ms));
 
   const ids = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
-  // Process in sub-batches of 10 to avoid Sky Mavis rate limits
-  const children = [];
-  for (let i = 0; i < ids.length; i += 10) {
-    const batch = ids.slice(i, i + 10);
-    const results = await Promise.allSettled(batch.map(async (id) => {
+  const fetchOne = async (id) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const r = await fetch(
           `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/${CONTRACT}/tokens/${id}`,
           { headers: { 'X-API-Key': API_KEY }, signal: AbortSignal.timeout(5000) }
         );
+        if (r.status === 429) { await sleep(1000 * (attempt + 1)); continue; }
         if (!r.ok) return null;
         const json = await r.json();
         const item = json?.result?.token ?? json?.result ?? json;
@@ -32,10 +31,13 @@ module.exports = async function handler(req, res) {
         if (getA('Parent 1') !== parentId && getA('Parent 2') !== parentId) return null;
         return { token_id: String(id), image: meta?.image || '', attributes: attrs };
       } catch { return null; }
-    }));
-    results.forEach(r => r.status === 'fulfilled' && r.value && children.push(r.value));
-  }
+    }
+    return null;
+  };
 
-  res.setHeader('Cache-Control', 's-maxage=600');
+  const results = await Promise.allSettled(ids.map(fetchOne));
+  const children = results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
+
+  res.setHeader('Cache-Control', 's-maxage=300');
   return res.status(200).json({ children, scanned: ids.length });
 }
