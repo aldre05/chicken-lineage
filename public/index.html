@@ -314,12 +314,12 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CONCURRENCY = 50; // 50 parallel direct requests to chicken-api-ivory
+  const CONCURRENCY = 200;
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
   const ids = Array.from({ length: scanEnd - scanStart + 1 }, (_, i) => scanStart + i);
-
   const startTime = Date.now();
+
   for (let i = 0; i < ids.length; i += CONCURRENCY) {
     const pct = Math.round((i / ids.length) * 100);
     const elapsed = (Date.now() - startTime) / 1000;
@@ -331,7 +331,6 @@ async function findChildren(parentId) {
     await Promise.all(ids.slice(i, i + CONCURRENCY).map(async id => {
       const k = String(id);
       try {
-        // Try cache first
         let data = cache.has(k) ? cache.get(k) : null;
         if (!data) {
           const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
@@ -341,10 +340,8 @@ async function findChildren(parentId) {
         }
         const attrs = data.attributes || [];
         const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
-        if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) {
-          found.push(k);
-        }
-      } catch { /* skip */ }
+        if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) found.push(k);
+      } catch { }
     }));
   }
   return found;
