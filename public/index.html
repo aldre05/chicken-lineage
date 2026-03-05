@@ -600,6 +600,7 @@ async function explore(id) {
 
   // Re-derive ALL edges - only between two known, positioned nodes
   const posMap = new Map(positions.filter(p => !p.chicken.unknown).map(p => [p.chicken.id, p]));
+  console.log('posMap keys:', [...posMap.keys()]);
   renderedEdges = [];
   positions.forEach(p => {
     const c = p.chicken;
@@ -607,10 +608,13 @@ async function explore(id) {
     [c.parent1, c.parent2].forEach(pid => {
       if (pid && pid !== '0' && posMap.has(pid)) {
         const par = posMap.get(pid);
+        console.log(`Edge: #${par.chicken.id} -> #${c.id}`);
         renderedEdges.push({
           x1: par.x + NODE_W/2, y1: par.y + NODE_H,
           x2: p.x   + NODE_W/2, y2: p.y
         });
+      } else if (pid && pid !== '0') {
+        console.log(`No edge for #${c.id} parent ${pid} - not in posMap`);
       }
     });
   });
