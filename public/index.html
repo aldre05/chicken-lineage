@@ -314,8 +314,8 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK    = 100; // 100 IDs per server call, all parallel server-side
-  const PARALLEL = 8;   // 8 simultaneous server calls = 800 IDs checked at once
+  const CHUNK    = 100;
+  const PARALLEL = 8;
 
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
@@ -325,14 +325,9 @@ async function findChildren(parentId) {
     chunks.push([s, Math.min(s + CHUNK - 1, scanEnd)]);
   }
 
-  const startTime = Date.now();
   for (let i = 0; i < chunks.length; i += PARALLEL) {
     const pct = Math.round((i / chunks.length) * 100);
-    const elapsed = (Date.now() - startTime) / 1000;
-    const rate = i / (elapsed || 1);
-    const eta = rate > 0 ? Math.round((chunks.length - i) / rate) : '?';
-    const etaStr = eta === '?' ? '' : eta < 60 ? ` · ~${eta}s left` : ` · ~${Math.round(eta/60)}m left`;
-    setStatus(`Scanning #${parentId}… ${pct}%${etaStr} — ${found.length} found`);
+    setStatus(`Scanning #${parentId} offspring… ${pct}% (${found.length} found)`);
 
     await Promise.all(chunks.slice(i, i + PARALLEL).map(async ([start, end]) => {
       try {
@@ -343,7 +338,7 @@ async function findChildren(parentId) {
           cache.set(String(c.token_id), c);
           found.push(String(c.token_id));
         });
-      } catch { }
+      } catch { /* skip failed chunks */ }
     }));
   }
   return found;
