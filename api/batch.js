@@ -7,30 +7,30 @@ module.exports = async function handler(req, res) {
 
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
-  const endId    = Math.min(parseInt(end) || startId + 4, startId + 4); // just 5 IDs for debug
+  const endId    = Math.min(parseInt(end) || startId + 99, startId + 99);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
-  const debug = [];
   const children = [];
 
-  for (const id of ids) {
-    try {
-      const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`, {
-        signal: AbortSignal.timeout(8000)
-      });
-      const data = await r.json();
-      const attrs = data.attributes || [];
-      const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
-      const p1 = getA('Parent 1');
-      const p2 = getA('Parent 2');
-      const match = p1 === parentId || p2 === parentId;
-      debug.push({ id, status: r.status, p1, p2, match });
-      if (match) children.push({ token_id: String(id), image: data.image || '', attributes: attrs });
-    } catch(e) {
-      debug.push({ id, error: e.message });
-    }
+  // Process in parallel batches of 10 - safe for Vercel outbound connections
+  for (let i = 0; i < ids.length; i += 10) {
+    const batch = ids.slice(i, i + 10);
+    const results = await Promise.allSettled(batch.map(async (id) => {
+      try {
+        const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`, {
+          signal: AbortSignal.timeout(8000)
+        });
+        if (!r.ok) return null;
+        const data = await r.json();
+        const attrs = data.attributes || [];
+        const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
+        if (getA('Parent 1') !== parentId && getA('Parent 2') !== parentId) return null;
+        return { token_id: String(id), image: data.image || '', attributes: attrs };
+      } catch { return null; }
+    }));
+    results.forEach(r => r.status === 'fulfilled' && r.value && children.push(r.value));
   }
 
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({ children, scanned: ids.length, debug });
+  return res.status(200).json({ children, scanned: ids.length });
 }
