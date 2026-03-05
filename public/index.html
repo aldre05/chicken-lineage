@@ -340,15 +340,17 @@ async function findChildren(parentId) {
     await Promise.all(chunks.slice(i, i + PARALLEL).map(async ([start, end]) => {
       try {
         const r = await fetch(`/api/batch?parent=${parentId}&start=${start}&end=${end}`);
-        if (!r.ok) return;
         const data = await r.json();
+        if (i === 0) console.log(`[batch test] status=${r.status} children=${data.children?.length} scanned=${data.scanned}`);
+        if (!r.ok) return;
         (data.children || []).forEach(c => {
           cache.set(String(c.token_id), c);
           found.push(String(c.token_id));
         });
-      } catch { /* skip failed chunks */ }
+      } catch(e) { if (i === 0) console.log('[batch error]', e.message); }
     }));
   }
+  console.log(`[findChildren #${parentId}] done, found=${found.length}`);
   return found;
 }
 
