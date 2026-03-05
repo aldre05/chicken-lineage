@@ -314,33 +314,35 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CONCURRENCY = 200;
+  const CHUNK    = 100; // 100 IDs per server call, all parallel server-side
+  const PARALLEL = 8;   // 8 simultaneous server calls = 800 IDs checked at once
+
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
-  const ids = Array.from({ length: scanEnd - scanStart + 1 }, (_, i) => scanStart + i);
-  const startTime = Date.now();
 
-  for (let i = 0; i < ids.length; i += CONCURRENCY) {
-    const pct = Math.round((i / ids.length) * 100);
+  const chunks = [];
+  for (let s = scanStart; s <= scanEnd; s += CHUNK) {
+    chunks.push([s, Math.min(s + CHUNK - 1, scanEnd)]);
+  }
+
+  const startTime = Date.now();
+  for (let i = 0; i < chunks.length; i += PARALLEL) {
+    const pct = Math.round((i / chunks.length) * 100);
     const elapsed = (Date.now() - startTime) / 1000;
     const rate = i / (elapsed || 1);
-    const eta = rate > 0 ? Math.round((ids.length - i) / rate) : '?';
+    const eta = rate > 0 ? Math.round((chunks.length - i) / rate) : '?';
     const etaStr = eta === '?' ? '' : eta < 60 ? ` · ~${eta}s left` : ` · ~${Math.round(eta/60)}m left`;
     setStatus(`Scanning #${parentId}… ${pct}%${etaStr} — ${found.length} found`);
 
-    await Promise.all(ids.slice(i, i + CONCURRENCY).map(async id => {
-      const k = String(id);
+    await Promise.all(chunks.slice(i, i + PARALLEL).map(async ([start, end]) => {
       try {
-        let data = cache.has(k) ? cache.get(k) : null;
-        if (!data) {
-          const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
-          if (!r.ok) return;
-          data = await r.json();
-          cache.set(k, data);
-        }
-        const attrs = data.attributes || [];
-        const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
-        if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) found.push(k);
+        const r = await fetch(`/api/batch?parent=${parentId}&start=${start}&end=${end}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        (data.children || []).forEach(c => {
+          cache.set(String(c.token_id), c);
+          found.push(String(c.token_id));
+        });
       } catch { }
     }));
   }
