@@ -7,18 +7,18 @@ module.exports = async function handler(req, res) {
 
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
-  const endId    = Math.min(parseInt(end) || startId + 99, startId + 99);
+  const endId    = Math.min(parseInt(end) || startId + 29, startId + 29); // 30 IDs
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
   const children = [];
 
-  // Process in parallel batches of 10 - safe for Vercel outbound connections
-  for (let i = 0; i < ids.length; i += 10) {
-    const batch = ids.slice(i, i + 10);
+  // 5 at a time - proven safe, fast enough
+  for (let i = 0; i < ids.length; i += 5) {
+    const batch = ids.slice(i, i + 5);
     const results = await Promise.allSettled(batch.map(async (id) => {
       try {
         const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`, {
-          signal: AbortSignal.timeout(8000)
+          signal: AbortSignal.timeout(5000)
         });
         if (!r.ok) return null;
         const data = await r.json();
