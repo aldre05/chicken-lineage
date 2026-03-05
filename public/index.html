@@ -341,13 +341,16 @@ async function findChildren(parentId) {
       try {
         const r = await fetch(`/api/batch?parent=${parentId}&start=${start}&end=${end}`);
         const data = await r.json();
-        if (i === 0) console.log(`[batch test] status=${r.status} children=${data.children?.length} scanned=${data.scanned}`);
+        // Log chunk that covers known child #15288
+        if (start <= 15288 && end >= 15288) {
+          console.log(`[key chunk ${start}-${end}] status=${r.status} children=${JSON.stringify(data.children)} scanned=${data.scanned}`);
+        }
         if (!r.ok) return;
         (data.children || []).forEach(c => {
           cache.set(String(c.token_id), c);
           found.push(String(c.token_id));
         });
-      } catch(e) { if (i === 0) console.log('[batch error]', e.message); }
+      } catch(e) { console.log(`[batch error ${start}-${end}]`, e.message); }
     }));
   }
   console.log(`[findChildren #${parentId}] done, found=${found.length}`);
