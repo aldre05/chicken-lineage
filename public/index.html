@@ -314,31 +314,37 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK    = 50;
-  const PARALLEL = 5;
-
+  const CONCURRENCY = 50; // 50 parallel direct requests to chicken-api-ivory
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
+  const ids = Array.from({ length: scanEnd - scanStart + 1 }, (_, i) => scanStart + i);
 
-  const chunks = [];
-  for (let s = scanStart; s <= scanEnd; s += CHUNK) {
-    chunks.push([s, Math.min(s + CHUNK - 1, scanEnd)]);
-  }
+  const startTime = Date.now();
+  for (let i = 0; i < ids.length; i += CONCURRENCY) {
+    const pct = Math.round((i / ids.length) * 100);
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = i / (elapsed || 1);
+    const eta = rate > 0 ? Math.round((ids.length - i) / rate) : '?';
+    const etaStr = eta === '?' ? '' : eta < 60 ? ` · ~${eta}s left` : ` · ~${Math.round(eta/60)}m left`;
+    setStatus(`Scanning #${parentId}… ${pct}%${etaStr} — ${found.length} found`);
 
-  for (let i = 0; i < chunks.length; i += PARALLEL) {
-    const pct = Math.round((i / chunks.length) * 100);
-    setStatus(`Scanning #${parentId} offspring… ${pct}% (${found.length} found)`);
-
-    await Promise.all(chunks.slice(i, i + PARALLEL).map(async ([start, end]) => {
+    await Promise.all(ids.slice(i, i + CONCURRENCY).map(async id => {
+      const k = String(id);
       try {
-        const r = await fetch(`/api/batch?parent=${parentId}&start=${start}&end=${end}`);
-        if (!r.ok) return;
-        const data = await r.json();
-        (data.children || []).forEach(c => {
-          cache.set(String(c.token_id), c);
-          found.push(String(c.token_id));
-        });
-      } catch { /* skip failed chunks */ }
+        // Try cache first
+        let data = cache.has(k) ? cache.get(k) : null;
+        if (!data) {
+          const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
+          if (!r.ok) return;
+          data = await r.json();
+          cache.set(k, data);
+        }
+        const attrs = data.attributes || [];
+        const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
+        if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) {
+          found.push(k);
+        }
+      } catch { /* skip */ }
     }));
   }
   return found;
