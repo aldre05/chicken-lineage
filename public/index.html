@@ -322,8 +322,8 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK    = 50;  // 50 IDs per batch call
-  const PARALLEL = 4;   // 4 concurrent batch calls
+  const CHUNK    = 50;
+  const PARALLEL = 3;
 
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
@@ -340,20 +340,15 @@ async function findChildren(parentId) {
     await Promise.all(chunks.slice(i, i + PARALLEL).map(async ([start, end]) => {
       try {
         const r = await fetch(`/api/batch?parent=${parentId}&start=${start}&end=${end}`);
-        const data = await r.json();
-        // Log chunk that covers known child #15288
-        if (start <= 15288 && end >= 15288) {
-          console.log(`[key chunk ${start}-${end}] status=${r.status} children=${JSON.stringify(data.children)} scanned=${data.scanned}`);
-        }
         if (!r.ok) return;
+        const data = await r.json();
         (data.children || []).forEach(c => {
           cache.set(String(c.token_id), c);
           found.push(String(c.token_id));
         });
-      } catch(e) { console.log(`[batch error ${start}-${end}]`, e.message); }
+      } catch { /* skip failed chunks */ }
     }));
   }
-  console.log(`[findChildren #${parentId}] done, found=${found.length}`);
   return found;
 }
 
@@ -599,8 +594,6 @@ async function explore(id) {
   positions.forEach(p => p.x += shiftX);
   renderedEdges.forEach(e => { e.x1 += shiftX; e.x2 += shiftX; });
 
-  // Re-derive ALL edges from the final shifted positions using parent/child IDs
-  // This guarantees edges always connect the correct nodes
   const posMap = new Map(positions.filter(p => !p.chicken.unknown).map(p => [p.chicken.id, p]));
   renderedEdges = [];
   positions.forEach(p => {
