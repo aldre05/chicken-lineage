@@ -322,8 +322,8 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK    = 30;  // 30 IDs per batch call, all parallel server-side (~300ms per call)
-  const PARALLEL = 3;   // 3 batch calls at once = 90 simultaneous Sky Mavis calls (safe rate)
+  const CHUNK    = 100; // 100 IDs per batch call, all parallel server-side
+  const PARALLEL = 5;   // 5 concurrent batch calls = 500 IDs checked at once
 
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
@@ -426,7 +426,7 @@ function roleColor(role) {
 }
 
 function renderAll(positions) {
-  if (!positions.length) return;
+  if (!positions.length) return; // nothing to render
   const scene = document.getElementById('scene');
   scene.innerHTML = '';
 
@@ -594,7 +594,8 @@ async function explore(id) {
   positions.forEach(p => p.x += shiftX);
   renderedEdges.forEach(e => { e.x1 += shiftX; e.x2 += shiftX; });
 
-  // Derive edges - only between two known positioned nodes
+  // Re-derive ALL edges from the final shifted positions using parent/child IDs
+  // This guarantees edges always connect the correct nodes
   const posMap = new Map(positions.filter(p => !p.chicken.unknown).map(p => [p.chicken.id, p]));
   renderedEdges = [];
   positions.forEach(p => {
