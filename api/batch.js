@@ -7,10 +7,22 @@ module.exports = async function handler(req, res) {
 
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
-  const endId    = Math.min(parseInt(end) || startId + 99, startId + 99); // 100 IDs
+  const endId    = Math.min(parseInt(end) || startId + 99, startId + 99);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
-  // All 100 fully parallel - chicken-api-ivory has no rate limits
+  // Test one known child to diagnose
+  const testId = ids.find(id => id === 15288) || ids[0];
+  let diagnosis = null;
+  try {
+    const tr = await fetch(`https://chicken-api-ivory.vercel.app/api/${testId}`, {
+      signal: AbortSignal.timeout(8000)
+    });
+    const td = await tr.json();
+    const attrs = td.attributes || [];
+    const p1 = String((attrs.find(a => a.trait_type === 'Parent 1') || {}).value || '0');
+    diagnosis = { testId, status: tr.status, p1, parentId };
+  } catch(e) { diagnosis = { error: e.message }; }
+
   const results = await Promise.allSettled(ids.map(async (id) => {
     try {
       const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`, {
@@ -26,6 +38,6 @@ module.exports = async function handler(req, res) {
   }));
 
   const children = results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
-  res.setHeader('Cache-Control', 's-maxage=600');
-  return res.status(200).json({ children, scanned: ids.length });
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(200).json({ children, scanned: ids.length, diagnosis });
 }
