@@ -247,21 +247,13 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function fetchChicken(id) {
   const k = String(id);
   if (cache.has(k)) return cache.get(k);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const r = await fetch(`/api/chicken?id=${id}`);
-      if (r.status === 429) {
-        await sleep(2000 * (attempt + 1)); // wait 2s, 4s, 6s
-        continue;
-      }
-      if (!r.ok) { cache.set(k, null); return null; }
-      const d = await r.json();
-      cache.set(k, d);
-      return d;
-    } catch { cache.set(k, null); return null; }
-  }
-  cache.set(k, null);
-  return null;
+  try {
+    const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
+    if (!r.ok) { cache.set(k, null); return null; }
+    const d = await r.json();
+    cache.set(k, d);
+    return d;
+  } catch { cache.set(k, null); return null; }
 }
 
 function attr(attrs, name) {
@@ -323,7 +315,7 @@ async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
   const CHUNK    = 50;
-  const PARALLEL = 3;
+  const PARALLEL = 5;
 
   const scanStart = pid >= 11111 ? pid + 1 : 2223;
   const scanEnd   = 20000;
