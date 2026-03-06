@@ -7,10 +7,9 @@ module.exports = async function handler(req, res) {
 
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
-  const endId    = parseInt(end) || (startId + 29);
+  const endId    = parseInt(end) || (startId + 999);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
-  // All IDs fully parallel, no timeout - let Vercel manage the function timeout
   const results = await Promise.allSettled(ids.map(async (id) => {
     try {
       const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
