@@ -7,7 +7,7 @@ module.exports = async function handler(req, res) {
 
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
-  const endId    = parseInt(end) || (startId + 999);
+  const endId    = parseInt(end) || (startId + 199);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
   const results = await Promise.allSettled(ids.map(async (id) => {
