@@ -311,43 +311,15 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
   return node;
 }
 
-// Cache the latest token ID so we only fetch it once per session
-let latestTokenId = null;
-async function getLatestTokenId() {
-  if (latestTokenId) return latestTokenId;
-  try {
-    // Binary search: find the highest minted ID by probing
-    // Start at a known high point and walk up until 404
-    let lo = 20000, hi = lo;
-    // Probe upward in steps of 500 until we get a 404
-    while (true) {
-      const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${hi}`);
-      if (!r.ok) break;
-      hi += 500;
-    }
-    // Binary search between lo and hi
-    while (lo < hi - 1) {
-      const mid = Math.floor((lo + hi) / 2);
-      const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${mid}`);
-      r.ok ? (lo = mid) : (hi = mid);
-    }
-    latestTokenId = lo;
-  } catch {
-    latestTokenId = 20000; // fallback
-  }
-  return latestTokenId;
-}
-
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
   const CHUNK    = 30;
   const PARALLEL = 10;
 
-  const scanStart = pid + 1; // children always have higher IDs than parents
-  const scanEnd   = await getLatestTokenId();
-
-  setStatus(`Scanning #${parentId}… checking up to #${scanEnd}`);
+  // Scan from pid+1 - children are always minted after parents
+  const scanStart = pid + 1;
+  const scanEnd   = 30000; // generous upper bound, handles years of growth
 
   const chunks = [];
   for (let s = scanStart; s <= scanEnd; s += CHUNK) {
