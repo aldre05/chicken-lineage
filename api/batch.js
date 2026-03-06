@@ -2,18 +2,28 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { parent, start, end, concurrency } = req.query;
+  const { parent, start, end } = req.query;
   if (!parent) return res.status(400).json({ error: 'Missing parent' });
 
   const parentId = String(parent);
   const startId  = parseInt(start) || 1;
   const endId    = Math.min(parseInt(end) || startId + 29, startId + 29);
-  const CONC     = parseInt(concurrency) || 10; // test different values
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
+  // Test: fetch just id 15288 directly to see what happens
+  const testR = await fetch(`https://chicken-api-ivory.vercel.app/api/15288`, {
+    signal: AbortSignal.timeout(6000)
+  });
+  const testStatus = testR.status;
+  let testP1 = null;
+  if (testR.ok) {
+    const d = await testR.json();
+    testP1 = String((d.attributes?.find(a => a.trait_type === 'Parent 1') || {}).value || '0');
+  }
+
   const children = [];
-  for (let i = 0; i < ids.length; i += CONC) {
-    const batch = ids.slice(i, i + CONC);
+  for (let i = 0; i < ids.length; i += 5) {
+    const batch = ids.slice(i, i + 5);
     const results = await Promise.allSettled(batch.map(async (id) => {
       try {
         const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`, {
@@ -31,5 +41,5 @@ module.exports = async function handler(req, res) {
   }
 
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({ children, scanned: ids.length, concurrency: CONC });
+  return res.status(200).json({ children, scanned: ids.length, testStatus, testP1, parentId });
 }
