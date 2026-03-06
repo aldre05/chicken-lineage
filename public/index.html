@@ -314,8 +314,8 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK    = 100; // 100 IDs per batch, all parallel server-side
-  const PARALLEL = 8;   // 8 concurrent batch calls = 800 IDs checked at once
+  const CHUNK    = 500; // 500 IDs per batch, all parallel server-side (confirmed working)
+  const PARALLEL = 4;   // 4 concurrent batch calls = 2000 IDs at once
 
   const scanStart = pid + 1;
   const scanEnd   = 30000;
