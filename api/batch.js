@@ -10,36 +10,23 @@ module.exports = async function handler(req, res) {
   const endId    = Math.min(parseInt(end) || startId + 29, startId + 29);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => startId + i);
 
-  // Test: fetch just id 15288 directly to see what happens
-  const testR = await fetch(`https://chicken-api-ivory.vercel.app/api/15288`, {
-    signal: AbortSignal.timeout(6000)
-  });
-  const testStatus = testR.status;
-  let testP1 = null;
-  if (testR.ok) {
-    const d = await testR.json();
-    testP1 = String((d.attributes?.find(a => a.trait_type === 'Parent 1') || {}).value || '0');
-  }
-
   const children = [];
-  for (let i = 0; i < ids.length; i += 5) {
-    const batch = ids.slice(i, i + 5);
-    const results = await Promise.allSettled(batch.map(async (id) => {
-      try {
-        const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`, {
-          signal: AbortSignal.timeout(6000)
-        });
-        if (!r.ok) return null;
-        const data = await r.json();
-        const attrs = data.attributes || [];
-        const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
-        if (getA('Parent 1') !== parentId && getA('Parent 2') !== parentId) return null;
-        return { token_id: String(id), image: data.image || '', attributes: attrs };
-      } catch { return null; }
-    }));
-    results.forEach(r => r.status === 'fulfilled' && r.value && children.push(r.value));
+
+  for (const id of ids) {
+    try {
+      const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`, {
+        signal: AbortSignal.timeout(6000)
+      });
+      if (!r.ok) continue;
+      const data = await r.json();
+      const attrs = data.attributes || [];
+      const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
+      if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) {
+        children.push({ token_id: String(id), image: data.image || '', attributes: attrs });
+      }
+    } catch { continue; }
   }
 
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({ children, scanned: ids.length, testStatus, testP1, parentId });
+  return res.status(200).json({ children, scanned: ids.length });
 }
