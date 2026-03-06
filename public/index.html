@@ -317,23 +317,17 @@ async function findChildren(parentId) {
   const CHUNK    = 30;
   const PARALLEL = 10;
 
-  // Scan from pid+1 - children are always minted after parents
   const scanStart = pid + 1;
-  const scanEnd   = 30000; // generous upper bound, handles years of growth
+  const scanEnd   = 30000;
 
   const chunks = [];
   for (let s = scanStart; s <= scanEnd; s += CHUNK) {
     chunks.push([s, Math.min(s + CHUNK - 1, scanEnd)]);
   }
 
-  const startTime = Date.now();
   for (let i = 0; i < chunks.length; i += PARALLEL) {
     const pct = Math.round((i / chunks.length) * 100);
-    const elapsed = (Date.now() - startTime) / 1000;
-    const rate = i / (elapsed || 1);
-    const eta = rate > 0 ? Math.round((chunks.length - i) / rate) : '?';
-    const etaStr = eta === '?' ? '' : eta < 60 ? ` · ~${eta}s left` : ` · ~${Math.round(eta/60)}m left`;
-    setStatus(`Scanning #${parentId}… ${pct}%${etaStr} — ${found.length} found`);
+    setStatus(`Scanning #${parentId} offspring… ${pct}% (${found.length} found)`);
 
     await Promise.all(chunks.slice(i, i + PARALLEL).map(async ([start, end]) => {
       try {
@@ -344,7 +338,7 @@ async function findChildren(parentId) {
           cache.set(String(c.token_id), c);
           found.push(String(c.token_id));
         });
-      } catch { }
+      } catch { /* skip failed chunks */ }
     }));
   }
   return found;
