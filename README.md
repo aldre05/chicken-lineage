@@ -2,6 +2,17 @@
 
 Chicken Saga Lineage Explorer is a lightweight web application for exploring the family tree of a Chicken Saga NFT. The project is built as a static single-page interface backed by Vercel serverless functions that proxy and aggregate metadata from external APIs.
 
+## Specification Source of Truth
+
+Behavioral requirements for this project are defined in OpenSpec under `openspec/specs/`. The `README.md` is a descriptive overview of the system, but the normative baseline for expected behavior lives in these specs:
+
+- `openspec/specs/lineage-exploration/spec.md`
+- `openspec/specs/graph-visualization/spec.md`
+- `openspec/specs/metadata-access/spec.md`
+- `openspec/specs/diagnostic-endpoints/spec.md`
+
+Future behavior changes should be proposed as OpenSpec changes before they are treated as part of the baseline.
+
 ## Overview
 
 The application lets a user enter a chicken ID and visualize:
@@ -101,6 +112,9 @@ The repo is designed for Vercel deployment:
 |   |-- chicken.js   # Metadata proxy with fallback strategy
 |   |-- debug.js     # Diagnostic endpoint for upstream API inspection
 |   `-- test.js      # Diagnostic endpoint for parent-child validation
+|-- openspec/
+|   |-- specs/       # Normative project requirements and capabilities
+|   `-- changes/     # Proposed spec changes before they are merged
 |-- public/
 |   `-- index.html   # Entire frontend UI, styling, rendering, and client logic
 |-- package.json     # Minimal project metadata
