@@ -1,8 +1,22 @@
 import {
   BATCH_CHUNK_SIZE,
   BATCH_PARALLEL_REQUESTS,
-  DESCENDANT_SCAN_END,
 } from '../config/constants.js';
+
+let cachedScanEnd = null;
+
+async function getScanEnd() {
+  if (cachedScanEnd) return cachedScanEnd;
+  try {
+    const r = await fetch('/api/max-id');
+    if (r.ok) {
+      const { maxId } = await r.json();
+      cachedScanEnd = maxId;
+      return cachedScanEnd;
+    }
+  } catch {}
+  return 17500; // safe fallback
+}
 
 export async function fetchChicken(id, cache) {
   const key = String(id);
@@ -33,14 +47,16 @@ export async function findChildren(parentId, { cache, setStatus }) {
   const found = [];
   const scanStart = Number.parseInt(normalizedParentId, 10) + 1;
 
-  if (Number.isNaN(scanStart) || scanStart > DESCENDANT_SCAN_END) {
+  const scanEnd = await getScanEnd();
+
+  if (Number.isNaN(scanStart) || scanStart > scanEnd) {
     return found;
   }
 
   const chunks = [];
 
-  for (let start = scanStart; start <= DESCENDANT_SCAN_END; start += BATCH_CHUNK_SIZE) {
-    chunks.push([start, Math.min(start + BATCH_CHUNK_SIZE - 1, DESCENDANT_SCAN_END)]);
+  for (let start = scanStart; start <= scanEnd; start += BATCH_CHUNK_SIZE) {
+    chunks.push([start, Math.min(start + BATCH_CHUNK_SIZE - 1, scanEnd)]);
   }
 
   for (let index = 0; index < chunks.length; index += BATCH_PARALLEL_REQUESTS) {
