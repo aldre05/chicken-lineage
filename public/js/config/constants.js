@@ -1,10 +1,10 @@
-﻿export const NODE_WIDTH = 96;
+export const NODE_WIDTH = 96;
 export const NODE_HEIGHT = 114;
 export const HORIZONTAL_GAP = 28;
 export const VERTICAL_GAP = 56;
 export const BATCH_CHUNK_SIZE = 500;
-export const BATCH_PARALLEL_REQUESTS = 4;
-export const DESCENDANT_SCAN_END = 30000;
+export const BATCH_PARALLEL_REQUESTS = 6;
+export const DESCENDANT_SCAN_END = 16682;
 export const MAX_ANCESTOR_DEPTH = 2;
 
 export const ROLE_COLORS = {
