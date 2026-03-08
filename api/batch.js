@@ -70,14 +70,17 @@ module.exports = async function handler(req, res) {
   }
 
   // Step 4: Check all IDs for parent match
+  // chicken-api-ivory may wrap data inside a 'metadata' key
   const children = [];
   for (const id of ids) {
-    const data = cached[id] || fresh[id];
-    if (!data) continue;
-    const attrs = data.attributes || [];
+    const raw = cached[id] || fresh[id];
+    if (!raw) continue;
+    const data = raw.metadata || raw;
+    const attrs = data.attributes || raw.attributes || [];
+    const image = data.image || raw.image || '';
     const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
     if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) {
-      children.push({ token_id: id, image: data.image || '', attributes: attrs });
+      children.push({ token_id: id, image, attributes: attrs });
     }
   }
 
