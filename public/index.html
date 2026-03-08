@@ -168,8 +168,8 @@
 </div>
 
 <div id="canvas">
-  <svg id="connectors"></svg>
-  <div id="scene"></div>
+  <div id="scene">
+    <svg id="connectors"></svg></div>
 </div>
 
 <div id="info-panel">
@@ -231,7 +231,6 @@ canvas.addEventListener('wheel', e => {
 
 function applyTransform() {
   scene.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
-  document.getElementById('connectors').style.transform = scene.style.transform;
 }
 
 function centerOn(x, y) {
@@ -282,7 +281,8 @@ function parse(data, id) {
     parent2: String(attr(a,'Parent 2') || '0'),
     iAtk, iDef, iSpd, iHp,
     ip: iAtk*2+iDef*2+iSpd*2+iHp,
-    unknown: false
+    unknown: false,
+    dead: String(attr(a,'State')||'') === 'Dead'
   };
 }
 
@@ -314,8 +314,8 @@ async function buildDescTree(id, depth, maxDepth, visited = new Set()) {
 async function findChildren(parentId) {
   const pid = parseInt(parentId);
   const found = [];
-  const CHUNK    = 500; // 500 IDs per batch, all parallel server-side (confirmed working)
-  const PARALLEL = 4;   // 4 concurrent batch calls = 2000 IDs at once
+  const CHUNK    = 500;
+  const PARALLEL = 4;
 
   const scanStart = pid + 1;
   const scanEnd   = 30000;
@@ -427,7 +427,6 @@ function renderAll(positions) {
   const allY = positions.map(p=>p.y).concat(renderedEdges.flatMap(e=>[e.y1,e.y2]));
   const svgW = Math.max(...allX) + 300;
   const svgH = Math.max(...allY) + 300;
-
   svg.setAttribute('width', svgW);
   svg.setAttribute('height', svgH);
   svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
@@ -446,7 +445,7 @@ function renderAll(positions) {
 
   // Draw nodes
   positions.forEach(({chicken, x, y, role}) => {
-    const col = chicken.unknown ? '#c084fc' : roleColor(role);
+    const col = chicken.unknown ? '#c084fc' : chicken.dead ? '#cc2222' : roleColor(role);
     const div = document.createElement('div');
     div.className = `node ${chicken.unknown ? 'unknown' : role}`;
     div.style.left = x + 'px';
@@ -455,12 +454,22 @@ function renderAll(positions) {
     if (role === 'root') div.style.boxShadow = `0 0 24px rgba(245,166,35,0.35)`;
 
     if (chicken.image && !chicken.unknown) {
+      const imgWrap = document.createElement('div');
+      imgWrap.style.cssText = 'position:relative;width:100%;';
       const img = document.createElement('img');
       img.className = 'node-img';
       img.src = chicken.image;
       img.alt = `#${chicken.id}`;
       img.onerror = () => { img.style.display='none'; ph.style.display='flex'; };
-      div.appendChild(img);
+      if (chicken.dead) img.style.filter = 'grayscale(100%) brightness(0.5)';
+      imgWrap.appendChild(img);
+      if (chicken.dead) {
+        const badge = document.createElement('div');
+        badge.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(160,0,0,0.9);color:#fff;font-size:10px;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:3px;pointer-events:none;';
+        badge.textContent = '✕ DEAD';
+        imgWrap.appendChild(badge);
+      }
+      div.appendChild(imgWrap);
     }
     const ph = document.createElement('div');
     ph.className = 'node-img-placeholder';
