@@ -218,8 +218,17 @@ select {
   width: 100%;
 }
 
+.node__image-frame {
+  position: relative;
+  width: 100%;
+}
+
 .node__image {
   object-fit: cover;
+}
+
+.node__image--dead {
+  filter: grayscale(100%) brightness(0.5);
 }
 
 .node__placeholder {
@@ -228,6 +237,23 @@ select {
   font-size: 1.5rem;
   justify-content: center;
   opacity: 0.4;
+}
+
+.node__dead-badge {
+  background: rgba(160, 0, 0, 0.9);
+  border-radius: 0.25rem;
+  color: #fff;
+  font-family: 'Cinzel', serif;
+  font-size: 0.5rem;
+  font-weight: 700;
+  left: 50%;
+  letter-spacing: 0.08rem;
+  padding: 0.15rem 0.45rem;
+  pointer-events: none;
+  position: absolute;
+  text-transform: uppercase;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .node__divider {

@@ -38,6 +38,7 @@ export function parseChickenData(data, fallbackId) {
     iSpd: innateSpeed,
     iHp: innateHealth,
     ip: innateAttack * 2 + innateDefense * 2 + innateSpeed * 2 + innateHealth,
+    dead: String(getAttributeValue(attributes, 'State') || '') === 'Dead',
     unknown: false,
   };
 }

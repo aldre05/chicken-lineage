@@ -154,6 +154,7 @@ The family tree is rendered with:
 - HTML cards for nodes
 - SVG bezier curves for family connections
 - Role-based color coding for root, ancestors, descendants, and unknown entries
+- Dead chickens shown with a muted image treatment and a visible `DEAD` badge
 
 ### 8. Pan and zoom navigation
 
@@ -177,6 +178,7 @@ Clicking a node opens a detail panel showing:
 - breed count / breeds left
 - innate attack, defense, speed, health
 - computed innate points (IP)
+- dead/alive state inferred from metadata when available
 - parent links
 
 ### 11. Re-explore from any discovered node
@@ -233,6 +235,7 @@ The client normalizes upstream payloads into a simplified internal shape contain
 - descriptive attributes
 - innate combat stats
 - computed innate points
+- a derived `dead` flag based on the upstream `State` attribute
 - an `unknown` fallback state when metadata is missing
 
 ## Serverless Endpoints

@@ -21,7 +21,11 @@ function getRoleColor(role) {
 }
 
 function createNodeElement({ chicken, x, y, role, onNodeClick }) {
-  const color = chicken.unknown ? ROLE_COLORS.unknown : getRoleColor(role);
+  const color = chicken.unknown
+    ? ROLE_COLORS.unknown
+    : chicken.dead
+      ? '#cc2222'
+      : getRoleColor(role);
   const node = document.createElement('article');
   node.className = `node ${chicken.unknown ? 'unknown' : role}`;
   node.style.left = `${x}px`;
@@ -36,20 +40,37 @@ function createNodeElement({ chicken, x, y, role, onNodeClick }) {
   image.className = 'node__image';
   image.alt = `Chicken #${chicken.id}`;
 
+  const imageFrame = document.createElement('div');
+  imageFrame.className = 'node__image-frame';
+
   const placeholder = document.createElement('div');
   placeholder.className = 'node__placeholder';
-  placeholder.textContent = 'C';
+  placeholder.textContent = '🐔';
 
   if (chicken.image && !chicken.unknown) {
     image.src = chicken.image;
+    if (chicken.dead) {
+      image.classList.add('node__image--dead');
+    }
     image.addEventListener('error', () => {
       image.remove();
       placeholder.style.display = 'flex';
     }, { once: true });
-    node.appendChild(image);
+    imageFrame.appendChild(image);
     placeholder.style.display = 'none';
   } else {
     placeholder.style.display = 'flex';
+  }
+
+  if (chicken.dead && !chicken.unknown) {
+    const deadBadge = document.createElement('div');
+    deadBadge.className = 'node__dead-badge';
+    deadBadge.textContent = 'X DEAD';
+    imageFrame.appendChild(deadBadge);
+  }
+
+  if (imageFrame.childElementCount > 0) {
+    node.appendChild(imageFrame);
   }
 
   node.appendChild(placeholder);
