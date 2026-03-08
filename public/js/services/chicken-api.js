@@ -1,4 +1,4 @@
-﻿import {
+import {
   BATCH_CHUNK_SIZE,
   BATCH_PARALLEL_REQUESTS,
   DESCENDANT_SCAN_END,
@@ -12,7 +12,7 @@ export async function fetchChicken(id, cache) {
   }
 
   try {
-    const response = await fetch(`/api/chicken?id=${encodeURIComponent(key)}`);
+    const response = await fetch(`https://chicken-api-ivory.vercel.app/api/${key}`);
 
     if (!response.ok) {
       cache.set(key, null);
