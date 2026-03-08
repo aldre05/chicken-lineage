@@ -12,7 +12,7 @@ module.exports = async function handler(req, res) {
   for (const id of testIds) {
     try {
       const url = `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/${CONTRACT}/tokens/${id}`;
-      const r = await fetch(url, { headers: { 'X-API-Key': API_KEY }, signal: AbortSignal.timeout(8000) });
+      const r = await fetch(url, { headers: { 'X-API-Key': API_KEY } });
       const json = await r.json();
       const item = json?.result?.token ?? json?.result ?? json;
       const meta = item?.metadata ?? item;
