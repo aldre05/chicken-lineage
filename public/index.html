@@ -168,8 +168,8 @@
 </div>
 
 <div id="canvas">
-  <div id="scene">
-    <svg id="connectors"></svg></div>
+  <svg id="connectors"></svg>
+  <div id="scene"></div>
 </div>
 
 <div id="info-panel">
@@ -230,7 +230,11 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false });
 
 function applyTransform() {
-  scene.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
+  const t = `translate(${panX}px,${panY}px) scale(${scale})`;
+  scene.style.transform = t;
+  document.getElementById('connectors').style.transform = t;
+  document.getElementById('connectors').style.transformOrigin = '0 0';
+  scene.style.transformOrigin = '0 0';
 }
 
 function centerOn(x, y) {
