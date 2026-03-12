@@ -1,15 +1,16 @@
-﻿import { NODE_HEIGHT, NODE_WIDTH, ROLE_COLORS } from '../config/constants.js';
+import { NODE_HEIGHT, NODE_WIDTH, ROLE_COLORS } from '../config/constants.js';
 
 export function getInnatePointColor(innatePoints) {
-  if (innatePoints >= 220) {
+  // Max IP is now 280 (all 7 stats independent)
+  if (innatePoints >= 260) {
     return '#4cff91';
   }
 
-  if (innatePoints >= 190) {
+  if (innatePoints >= 220) {
     return '#ffd700';
   }
 
-  if (innatePoints >= 160) {
+  if (innatePoints >= 180) {
     return '#e8d5a3';
   }
 
