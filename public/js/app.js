@@ -1,4 +1,4 @@
-﻿import {
+import {
   HORIZONTAL_GAP,
   MAX_ANCESTOR_DEPTH,
   NODE_HEIGHT,
@@ -39,7 +39,7 @@ async function explore(id) {
 
   try {
     const selectedDepth = Number.parseInt(elements.depthSelect.value, 10);
-    const ancestorDepth = Math.min(MAX_ANCESTOR_DEPTH, selectedDepth);
+    const ancestorDepth = selectedDepth;
 
     status.show(`Loading #${normalizedId}...`);
     const rootData = await fetchChicken(normalizedId, store.cache);
