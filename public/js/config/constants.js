@@ -4,7 +4,7 @@ export const HORIZONTAL_GAP = 28;
 export const VERTICAL_GAP = 56;
 export const BATCH_CHUNK_SIZE = 500;
 export const BATCH_PARALLEL_REQUESTS = 6;
-export const MAX_ANCESTOR_DEPTH = 2;
+export const MAX_ANCESTOR_DEPTH = 30;
 
 export const ROLE_COLORS = {
   root: '#f5a623',
