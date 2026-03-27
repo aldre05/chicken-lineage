@@ -1,4 +1,4 @@
-﻿export function createViewportController(elements) {
+export function createViewportController(elements) {
   const state = {
     dragOriginX: 0,
     dragOriginY: 0,
@@ -52,7 +52,18 @@
   elements.canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
     const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1;
-    state.scale = Math.min(2.5, Math.max(0.2, state.scale * zoomFactor));
+    const newScale = Math.min(2.5, Math.max(0.2, state.scale * zoomFactor));
+
+    // Cursor position relative to the canvas element
+    const canvasRect = elements.canvas.getBoundingClientRect();
+    const cursorX = event.clientX - canvasRect.left;
+    const cursorY = event.clientY - canvasRect.top;
+
+    // Adjust pan so the point under the cursor stays fixed after scaling
+    state.panX = cursorX - (cursorX - state.panX) * (newScale / state.scale);
+    state.panY = cursorY - (cursorY - state.panY) * (newScale / state.scale);
+    state.scale = newScale;
+
     applyTransform();
   }, { passive: false });
 
