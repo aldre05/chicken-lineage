@@ -1,4 +1,5 @@
-﻿import { getInnatePointColor } from '../render/graph-renderer.js';
+import { getInnatePointColor } from '../render/graph-renderer.js';
+import { MAX_BREED_COUNT } from '../config/constants.js';
 
 function createRow(label, value, options = {}) {
   const row = document.createElement('div');
@@ -44,7 +45,7 @@ function setBody(panelBody, chicken, onExplore) {
     createRow('Instinct', chicken.instinct),
     createRow('Level', String(chicken.level)),
     createRow('Body', chicken.body),
-    createRow('Breeds left', `${3 - chicken.breedCount}/3`),
+    createRow('Breeds left', `${MAX_BREED_COUNT - chicken.breedCount}/${MAX_BREED_COUNT}`),
     createRow('Innate Points', String(chicken.ip), { color: getInnatePointColor(chicken.ip) }),
     createRow('ATK/DEF/SPD/HP', `${chicken.iAtk}/${chicken.iDef}/${chicken.iSpd}/${chicken.iHp}`),
   ];
