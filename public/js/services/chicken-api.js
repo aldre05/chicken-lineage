@@ -58,11 +58,30 @@ export async function fetchChicken(id, cache) {
   return promise;
 }
 
-export async function findChildren(parentId, { cache, setStatus }) {
+// Try the parent index first — a single DB query that returns results instantly
+// if this parent has been scanned before. Falls back to the full range scan
+// if the index has no entry yet (first time this parent is explored).
+async function findChildrenFromIndex(parentId, cache) {
+  try {
+    const r = await fetch(`/api/children?parent=${encodeURIComponent(parentId)}`);
+    if (!r.ok) return null;
+    const { children, indexed } = await r.json();
+    if (!indexed) return null; // not in index yet, fall back to scan
+
+    // Warm the client cache with the returned child data.
+    for (const child of children) {
+      cache.set(String(child.token_id), child);
+    }
+    return children.map((child) => String(child.token_id));
+  } catch {
+    return null; // network error — fall back to scan
+  }
+}
+
+async function findChildrenByScan(parentId, cache, setStatus) {
   const normalizedParentId = String(parentId);
   const found = [];
   const scanStart = Number.parseInt(normalizedParentId, 10) + 1;
-
   const scanEnd = await getScanEnd();
 
   if (Number.isNaN(scanStart) || scanStart > scanEnd) {
@@ -70,7 +89,6 @@ export async function findChildren(parentId, { cache, setStatus }) {
   }
 
   const chunks = [];
-
   for (let start = scanStart; start <= scanEnd; start += BATCH_CHUNK_SIZE) {
     chunks.push([start, Math.min(start + BATCH_CHUNK_SIZE - 1, scanEnd)]);
   }
@@ -79,13 +97,14 @@ export async function findChildren(parentId, { cache, setStatus }) {
 
   let completed = 0;
 
-  await Promise.all(chunks.map(async ([start, end]) => {
+  await Promise.all(chunks.map(async ([start, end], chunkIndex) => {
     try {
-      const response = await fetch(`/api/batch?parent=${encodeURIComponent(normalizedParentId)}&start=${start}&end=${end}`);
+      const isLast = chunkIndex === chunks.length - 1 ? '1' : '0';
+      const response = await fetch(
+        `/api/batch?parent=${encodeURIComponent(normalizedParentId)}&start=${start}&end=${end}&last=${isLast}`
+      );
 
-      if (!response.ok) {
-        return;
-      }
+      if (!response.ok) return;
 
       const data = await response.json();
 
@@ -103,4 +122,18 @@ export async function findChildren(parentId, { cache, setStatus }) {
   }));
 
   return found;
+}
+
+export async function findChildren(parentId, { cache, setStatus }) {
+  const normalizedParentId = String(parentId);
+
+  // Fast path: check the parent index first (single DB query, no scanning).
+  const indexed = await findChildrenFromIndex(normalizedParentId, cache);
+  if (indexed !== null) {
+    setStatus(`Loaded children of #${normalizedParentId} from index (${indexed.length} found)`);
+    return indexed;
+  }
+
+  // Slow path: full range scan — also populates the index for next time.
+  return findChildrenByScan(normalizedParentId, cache, setStatus);
 }
