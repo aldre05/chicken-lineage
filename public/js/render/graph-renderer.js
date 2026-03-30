@@ -27,6 +27,7 @@ function createNodeElement({ chicken, x, y, role, onNodeClick }) {
     : chicken.dead
       ? '#cc2222'
       : getRoleColor(role);
+
   const node = document.createElement('article');
   node.className = `node ${chicken.unknown ? 'unknown' : role}`;
   node.style.left = `${x}px`;
@@ -37,10 +38,8 @@ function createNodeElement({ chicken, x, y, role, onNodeClick }) {
     node.style.boxShadow = '0 0 24px rgba(245, 166, 35, 0.35)';
   }
 
-  const image = document.createElement('img');
-  image.className = 'node__image';
-  image.alt = `Chicken #${chicken.id}`;
-
+  // imageFrame always gets appended so the dead badge has a container
+  // regardless of whether an image is present.
   const imageFrame = document.createElement('div');
   imageFrame.className = 'node__image-frame';
 
@@ -49,32 +48,38 @@ function createNodeElement({ chicken, x, y, role, onNodeClick }) {
   placeholder.textContent = '🐔';
 
   if (chicken.image && !chicken.unknown) {
+    const image = document.createElement('img');
+    image.className = 'node__image';
+    image.alt = `Chicken #${chicken.id}`;
     image.src = chicken.image;
+
     if (chicken.dead) {
       image.classList.add('node__image--dead');
     }
+
+    // On load error, swap broken image for the placeholder inside the frame.
     image.addEventListener('error', () => {
       image.remove();
       placeholder.style.display = 'flex';
     }, { once: true });
+
     imageFrame.appendChild(image);
     placeholder.style.display = 'none';
   } else {
     placeholder.style.display = 'flex';
   }
 
+  // Placeholder always lives inside the frame so the dead badge overlays it.
+  imageFrame.appendChild(placeholder);
+
   if (chicken.dead && !chicken.unknown) {
     const deadBadge = document.createElement('div');
     deadBadge.className = 'node__dead-badge';
-    deadBadge.textContent = 'X DEAD';
+    deadBadge.textContent = '✕ DEAD';
     imageFrame.appendChild(deadBadge);
   }
 
-  if (imageFrame.childElementCount > 0) {
-    node.appendChild(imageFrame);
-  }
-
-  node.appendChild(placeholder);
+  node.appendChild(imageFrame);
 
   const divider = document.createElement('div');
   divider.className = 'node__divider';
