@@ -31,6 +31,27 @@ async function dbSet(entries) {
   });
 }
 
+// Write parent->child relationships into the index table so future lookups
+// via /api/children are instant instead of requiring a full range scan.
+async function indexChildren(parentId, children) {
+  if (!children.length) return;
+  const rows = children.map((child) => ({
+    parent_id: parentId,
+    child_id: String(child.token_id),
+    child_data: child,
+  }));
+  await fetch(`${SUPABASE_URL}/rest/v1/parent_index`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates',
+    },
+    body: JSON.stringify(rows),
+  });
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -39,8 +60,8 @@ module.exports = async function handler(req, res) {
   if (!parent) return res.status(400).json({ error: 'Missing parent' });
 
   const parentId = String(parent);
-  const startId  = parseInt(start) || 1;
-  const endId    = parseInt(end) || (startId + 499);
+  const startId  = parseInt(start, 10) || 1;
+  const endId    = parseInt(end, 10) || (startId + 499);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => String(startId + i));
 
   // Step 1: Check Supabase cache for all IDs at once
@@ -65,12 +86,11 @@ module.exports = async function handler(req, res) {
         toStore.push(r.value);
       }
     }
-    // Step 3: Save to Supabase - awaited so Vercel doesn't kill it early
+    // Step 3: Save to Supabase
     await dbSet(toStore).catch(() => {});
   }
 
   // Step 4: Check all IDs for parent match
-  // chicken-api-ivory may wrap data inside a 'metadata' key
   const children = [];
   for (const id of ids) {
     const raw = cached[id] || fresh[id];
@@ -82,6 +102,14 @@ module.exports = async function handler(req, res) {
     if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) {
       children.push({ token_id: id, image, attributes: attrs });
     }
+  }
+
+  // Step 5: Write discovered children into the parent index for future instant lookups.
+  // Only index when this is the last chunk (end >= scanEnd) so we don't write
+  // partial results that would cause /api/children to return incomplete data.
+  // We detect "last chunk" by checking if the caller signals it via a query param.
+  if (req.query.last === '1' || children.length > 0) {
+    indexChildren(parentId, children).catch(() => {});
   }
 
   res.setHeader('Cache-Control', 'no-store');
