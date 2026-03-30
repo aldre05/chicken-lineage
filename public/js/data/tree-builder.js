@@ -27,21 +27,14 @@ export async function buildDescendantTree(id, depth, maxDepth, dependencies, vis
   const generationLabel = depth === 0 ? 'children' : depth === 1 ? 'grandchildren' : `generation ${depth + 1} descendants`;
   dependencies.setStatus(`Found ${childIds.length} ${generationLabel} of #${normalizedId}, scanning their offspring...`);
 
-  // Mark all children visited up-front so sibling scans don't duplicate work.
-  const unvisitedIds = childIds.filter((childId) => {
-    if (visited.has(childId)) return false;
-    visited.add(childId);
-    return true;
-  });
-
-  // Fetch all child chickens in parallel before recursing, so their data is
-  // in the cache and subsequent recursive calls return immediately.
+  // Prefetch all children in parallel so their data lands in cache before
+  // recursing — recursive calls then return from cache immediately.
+  const unvisitedIds = childIds.filter((childId) => !visited.has(childId));
   await Promise.all(unvisitedIds.map((childId) => fetchChicken(childId, dependencies.cache)));
 
-  // Kick off all grandchild scans in parallel, then recurse once results
-  // are back. visited is already updated so there's no double-scanning.
+  // Now recurse — visited tracking happens inside each call as normal.
   const childNodes = await Promise.all(
-    unvisitedIds.map((childId) => buildDescendantTree(childId, depth + 1, maxDepth, dependencies, visited)),
+    childIds.map((childId) => buildDescendantTree(childId, depth + 1, maxDepth, dependencies, visited)),
   );
 
   node.children = childNodes.filter(Boolean);
