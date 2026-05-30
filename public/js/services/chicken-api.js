@@ -65,8 +65,9 @@ async function findChildrenFromIndex(parentId, cache) {
 
 // Write all discovered children into the index ONCE after the full scan
 // completes — never partial, so the index is always complete or absent.
+// Always called even for empty results so a sentinel gets written and
+// future lookups don't fall back to a full scan unnecessarily.
 async function writeChildrenToIndex(parentId, allChildren) {
-  if (!allChildren.length) return;
   try {
     await fetch('/api/index-children', {
       method: 'POST',
