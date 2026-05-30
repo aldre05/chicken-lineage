@@ -1,7 +1,6 @@
 // GET /api/children?parent=<id>
 // Returns all known children of a parent from the parent_index table.
-// Falls back to an empty list (not an error) if the table doesn't exist yet
-// or Supabase is unreachable — the caller can degrade to the scan path.
+// Returns indexed:false if not scanned yet so caller falls back to scan.
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -25,24 +24,28 @@ module.exports = async function handler(req, res) {
       }
     );
 
-    if (!r.ok) {
-      return res.status(200).json({ children: [], indexed: false });
-    }
+    if (!r.ok) return res.status(200).json({ children: [], indexed: false });
 
     const rows = await r.json();
 
-    // If no rows exist yet this parent hasn't been indexed — tell the client
-    // so it can fall back to the full scan and populate the index.
+    // No rows at all — not indexed yet, tell client to scan.
     if (!Array.isArray(rows) || rows.length === 0) {
       return res.status(200).json({ children: [], indexed: false });
     }
 
-    const children = rows.map((row) => row.child_data);
+    // Sentinel row means parent was scanned and genuinely has no children.
+    if (rows.length === 1 && rows[0].child_id === '__none__') {
+      return res.status(200).json({ children: [], indexed: true });
+    }
 
-    res.setHeader('Cache-Control', 's-maxage=60');
+    // Filter out any sentinel rows and return full raw child data.
+    const children = rows
+      .filter((row) => row.child_id !== '__none__' && row.child_data)
+      .map((row) => row.child_data);
+
+    res.setHeader('Cache-Control', 's-maxage=300');
     return res.status(200).json({ children, indexed: true });
   } catch (e) {
-    // Never block the UI — degrade gracefully to scan path.
     return res.status(200).json({ children: [], indexed: false, error: e.message });
   }
 };
