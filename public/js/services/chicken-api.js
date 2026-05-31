@@ -1,18 +1,24 @@
 import { BATCH_CHUNK_SIZE } from '../config/constants.js';
 
 let cachedScanEnd = null;
+let cachedScanEndTime = 0;
+const SCAN_END_TTL_MS = 5 * 60 * 1000; // re-fetch every 5 minutes
 
 async function getScanEnd() {
-  if (cachedScanEnd) return cachedScanEnd;
+  const now = Date.now();
+  if (cachedScanEnd && (now - cachedScanEndTime) < SCAN_END_TTL_MS) {
+    return cachedScanEnd;
+  }
   try {
     const r = await fetch('/api/max-id');
     if (r.ok) {
       const { maxId } = await r.json();
       cachedScanEnd = maxId;
+      cachedScanEndTime = now;
       return cachedScanEnd;
     }
   } catch {}
-  return 17500;
+  return 25000;
 }
 
 // In-flight deduplication — concurrent callers for the same ID share one request.
