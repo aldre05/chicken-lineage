@@ -21,6 +21,29 @@ async function getScanEnd() {
   return 25000;
 }
 
+// Concurrency limiter — prevents hammering chicken-api-ivory with hundreds
+// of simultaneous requests (deep ancestor trees trigger recursive Promise.all).
+// Only MAX_CONCURRENT fetches run at once; the rest wait in a queue.
+const MAX_CONCURRENT = 12;
+let _running = 0;
+const _waitQueue = [];
+
+function acquireSlot() {
+  if (_running < MAX_CONCURRENT) {
+    _running++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => _waitQueue.push(resolve));
+}
+
+function releaseSlot() {
+  _running--;
+  if (_waitQueue.length > 0) {
+    _running++;
+    _waitQueue.shift()();
+  }
+}
+
 // In-flight deduplication — concurrent callers for the same ID share one request.
 const inFlight = new Map();
 
@@ -30,21 +53,40 @@ export async function fetchChicken(id, cache) {
   if (inFlight.has(key)) return inFlight.get(key);
 
   const promise = (async () => {
-    try {
-      const response = await fetch(`https://chicken-api-ivory.vercel.app/api/${key}`);
-      if (!response.ok) { cache.set(key, null); return null; }
-      const data = await response.json();
-      cache.set(key, data);
-      return data;
-    } catch {
-      cache.set(key, null);
-      return null;
-    } finally {
-      inFlight.delete(key);
+    // Retry up to 3 times — rate-limited or timed-out requests often
+    // succeed on a second attempt once the queue drains a little.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await acquireSlot();
+      try {
+        if (attempt > 0) {
+          // Brief back-off before retrying so we don't immediately hit the
+          // same bottleneck again.
+          await new Promise((r) => setTimeout(r, attempt * 400));
+        }
+        const response = await fetch(`https://chicken-api-ivory.vercel.app/api/${key}`);
+        if (response.ok) {
+          const data = await response.json();
+          cache.set(key, data);
+          return data;
+        }
+        // 404 means chicken genuinely doesn't exist — no point retrying.
+        if (response.status === 404) {
+          cache.set(key, null);
+          return null;
+        }
+        // Any other non-OK (429 rate limit, 5xx) — retry.
+      } catch {
+        // Network error — retry.
+      } finally {
+        releaseSlot();
+      }
     }
+    // All retries exhausted — don't permanently cache so next explore can retry.
+    return null;
   })();
 
   inFlight.set(key, promise);
+  promise.finally(() => inFlight.delete(key));
   return promise;
 }
 
@@ -87,8 +129,8 @@ async function writeChildrenToIndex(parentId, allChildren) {
 
 async function findChildrenByScan(parentId, cache, setStatus) {
   const normalizedParentId = String(parentId);
-  const found = [];        // child IDs
-  const allRaw = [];       // full raw payloads for indexing
+  const found = [];
+  const allRaw = [];
   const scanStart = Number.parseInt(normalizedParentId, 10) + 1;
   const scanEnd = await getScanEnd();
 
@@ -111,7 +153,6 @@ async function findChildrenByScan(parentId, cache, setStatus) {
       const data = await response.json();
 
       for (const child of data.children || []) {
-        // batch.js now returns full raw payloads — derive the ID correctly.
         const src = child.metadata || child;
         const childId = String(src.token_id || src.id || child.token_id);
         if (!childId || childId === 'undefined') continue;
@@ -128,22 +169,18 @@ async function findChildrenByScan(parentId, cache, setStatus) {
     }
   }));
 
-  // Write the complete child list to the index now that the scan is done.
   writeChildrenToIndex(normalizedParentId, allRaw);
-
   return found;
 }
 
 export async function findChildren(parentId, { cache, setStatus }) {
   const normalizedParentId = String(parentId);
 
-  // Fast path: index hit — no scanning needed.
   const indexed = await findChildrenFromIndex(normalizedParentId, cache);
   if (indexed !== null) {
     setStatus(`Loaded children of #${normalizedParentId} from index (${indexed.length} found)`);
     return indexed;
   }
 
-  // Slow path: full range scan + index write for next time.
   return findChildrenByScan(normalizedParentId, cache, setStatus);
 }
