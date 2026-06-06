@@ -1,4 +1,4 @@
-﻿import {
+import {
   HORIZONTAL_GAP,
   NODE_HEIGHT,
   NODE_WIDTH,
@@ -25,7 +25,8 @@ function descendantSubtreeWidth(node) {
 }
 
 function ancestorSubtreeWidth(node) {
-  if (!node.parents.length) {
+  // Unknown nodes are leaf nodes — they have no parents to spread out.
+  if (!node || !node.parents.length) {
     return NODE_WIDTH;
   }
 
@@ -59,20 +60,26 @@ export function layoutDescendants(node, centerX, positionY, role, positions) {
 }
 
 export function layoutAncestors(node, centerX, positionY, positions) {
-  if (!node || node.chicken.unknown) {
+  if (!node) {
     return;
   }
 
   const leftX = centerX - NODE_WIDTH / 2;
   positions.push({ chicken: node.chicken, x: leftX, y: positionY, role: 'ancestor' });
 
-  const validParents = node.parents.filter((parent) => parent && !parent.chicken.unknown);
-  const parentWidths = validParents.map(ancestorSubtreeWidth);
+  // Unknown nodes (failed fetches) are shown as placeholders but have no
+  // parents to recurse into — keeps tree structure visible instead of hiding
+  // entire branches when individual fetches fail.
+  if (!node.parents.length) {
+    return;
+  }
+
+  const parentWidths = node.parents.map(ancestorSubtreeWidth);
   const totalWidth = parentWidths.reduce((sum, width) => sum + width + HORIZONTAL_GAP, -HORIZONTAL_GAP);
 
   let currentX = centerX - (totalWidth > 0 ? totalWidth / 2 : 0);
 
-  validParents.forEach((parent, index) => {
+  node.parents.forEach((parent, index) => {
     const parentCenterX = currentX + parentWidths[index] / 2;
     layoutAncestors(parent, parentCenterX, positionY - NODE_HEIGHT - VERTICAL_GAP, positions);
     currentX += parentWidths[index] + HORIZONTAL_GAP;
