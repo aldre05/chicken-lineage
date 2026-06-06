@@ -40,8 +40,7 @@ async function explore(id) {
     const selectedDepth = Number.parseInt(elements.depthSelect.value, 10);
     const ancestorDepth = selectedDepth;
 
-    // Keep the input field and URL in sync so the search is always
-    // bookmarkable and shareable.
+    // Keep URL in sync so searches are bookmarkable and shareable.
     elements.searchInput.value = normalizedId;
     const params = new URLSearchParams();
     params.set('depth', selectedDepth);
@@ -95,23 +94,18 @@ async function explore(id) {
       centerOnRoot: (x, y) => viewport.centerOn(x, y),
     });
   } catch (error) {
-    console.error('Failed to explore lineage', error);
+    console.error('Explore failed:', error);
     keepStatusVisible = true;
-    status.show('Failed to load lineage data. Please try again.');
-    window.setTimeout(() => status.hide(), 2500);
+    status.show(`Error: ${error.message}`);
+    window.setTimeout(() => status.hide(), 4000);
   } finally {
     if (!keepStatusVisible) {
       status.hide();
     }
-
-    if (elements.searchButton.disabled) {
-      elements.searchButton.disabled = false;
-    }
+    elements.searchButton.disabled = false;
   }
 }
 
-// Read depth and chickenId from the URL on page load so bookmarks and
-// shared links auto-populate the form and trigger the exploration.
 function initFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const depthParam = params.get('depth');
@@ -120,7 +114,6 @@ function initFromUrl() {
   if (depthParam) {
     const depthNum = parseInt(depthParam, 10);
     if (!isNaN(depthNum) && depthNum > 0) {
-      // Clamp to the range available in the select (1–30).
       const options = Array.from(elements.depthSelect.options).map((o) => parseInt(o.value, 10));
       const max = Math.max(...options);
       const min = Math.min(...options);
@@ -142,4 +135,8 @@ elements.searchForm.addEventListener('submit', (event) => {
 });
 
 window.explore = explore;
+
+// Confirm JS loaded — visible in browser console
+console.log('[chicken-lineage] app.js loaded, JS is running');
+
 initFromUrl();
