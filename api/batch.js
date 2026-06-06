@@ -1,6 +1,11 @@
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
+// Polite fetching: process uncached IDs in small groups with a pause between
+// each group so we don't hammer chicken-api-ivory all at once.
+const FETCH_GROUP_SIZE = 25;
+const FETCH_GROUP_DELAY_MS = 60;
+
 async function dbGet(ids) {
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/chickens?id=in.(${ids.join(',')})&select=id,data`,
@@ -21,15 +26,17 @@ async function dbSet(entries) {
       apikey: SUPABASE_KEY,
       Authorization: `Bearer ${SUPABASE_KEY}`,
       'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates'
+      Prefer: 'resolution=merge-duplicates',
     },
     body: JSON.stringify(entries.map(e => ({
       id: e.id,
       data: e.data,
-      updated_at: new Date().toISOString()
-    })))
+      updated_at: new Date().toISOString(),
+    }))),
   });
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -43,15 +50,17 @@ module.exports = async function handler(req, res) {
   const endId    = parseInt(end, 10) || (startId + 499);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => String(startId + i));
 
-  // Step 1: Check Supabase cache for all IDs at once
+  // Step 1: Supabase cache lookup
   const cached = await dbGet(ids).catch(() => ({}));
   const missing = ids.filter(id => !cached[id]);
 
-  // Step 2: Fetch only uncached IDs from chicken-api-ivory
+  // Step 2: Fetch uncached IDs in small polite groups
   const fresh = {};
   const toStore = [];
-  if (missing.length > 0) {
-    const results = await Promise.allSettled(missing.map(async (id) => {
+
+  for (let i = 0; i < missing.length; i += FETCH_GROUP_SIZE) {
+    const group = missing.slice(i, i + FETCH_GROUP_SIZE);
+    const results = await Promise.allSettled(group.map(async (id) => {
       try {
         const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
         if (!r.ok) return null;
@@ -59,18 +68,24 @@ module.exports = async function handler(req, res) {
         return { id, data };
       } catch { return null; }
     }));
+
     for (const r of results) {
       if (r.status === 'fulfilled' && r.value) {
         fresh[r.value.id] = r.value.data;
         toStore.push(r.value);
       }
     }
-    // Step 3: Save to Supabase chickens table
-    await dbSet(toStore).catch(() => {});
+
+    // Pause between groups — lets other players' requests through
+    if (i + FETCH_GROUP_SIZE < missing.length) {
+      await sleep(FETCH_GROUP_DELAY_MS);
+    }
   }
 
-  // Step 4: Check all IDs for parent match
-  // Return the FULL raw data so the client parser has everything it needs.
+  // Step 3: Save newly fetched chickens to Supabase
+  await dbSet(toStore).catch(() => {});
+
+  // Step 4: Filter for children of this parent — return full raw payload
   const children = [];
   for (const id of ids) {
     const raw = cached[id] || fresh[id];
@@ -79,7 +94,6 @@ module.exports = async function handler(req, res) {
     const attrs = data.attributes || raw.attributes || [];
     const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
     if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) {
-      // Store the full raw payload so nothing is lost when read back from index.
       children.push(raw);
     }
   }
@@ -89,6 +103,6 @@ module.exports = async function handler(req, res) {
     children,
     scanned: ids.length,
     fromCache: ids.length - missing.length,
-    fromApi: missing.length
+    fromApi: missing.length,
   });
-}
+};
