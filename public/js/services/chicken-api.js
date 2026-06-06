@@ -25,7 +25,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
 // Polite concurrency limiter for individual chicken fetches (ancestor tree).
-// Keeps concurrent requests low so we don't flood chicken-api-ivory.
 // ---------------------------------------------------------------------------
 const MAX_FETCH_CONCURRENT = 5;
 let _fetchRunning = 0;
@@ -49,7 +48,6 @@ function releaseFetchSlot() {
 
 // ---------------------------------------------------------------------------
 // Polite concurrency limiter for batch chunk requests (descendant scan).
-// Caps how many /api/batch calls run at once so the server isn't slammed.
 // ---------------------------------------------------------------------------
 const MAX_CHUNK_CONCURRENT = 4;
 let _chunkRunning = 0;
@@ -80,32 +78,34 @@ export async function fetchChicken(id, cache) {
   if (inFlight.has(key)) return inFlight.get(key);
 
   const promise = (async () => {
-    // Up to 3 attempts with increasing back-off between retries.
     for (let attempt = 0; attempt < 3; attempt++) {
+      // Sleep BEFORE acquiring a slot so we don't hold a slot while waiting.
+      // This keeps the queue moving for other requests during the back-off.
+      if (attempt > 0) {
+        await sleep(attempt * 500);
+      }
+
       await acquireFetchSlot();
       try {
-        if (attempt > 0) {
-          await sleep(attempt * 500);
-        }
         const response = await fetch(`https://chicken-api-ivory.vercel.app/api/${key}`);
         if (response.ok) {
           const data = await response.json();
           cache.set(key, data);
           return data;
         }
-        // 404 = chicken doesn't exist, no point retrying.
+        // 404 = chicken genuinely doesn't exist, no point retrying.
         if (response.status === 404) {
           cache.set(key, null);
           return null;
         }
-        // 429 / 5xx — back off and retry.
+        // 429 / 5xx — release slot and retry after back-off.
       } catch {
         // Network error — retry.
       } finally {
         releaseFetchSlot();
       }
     }
-    // Don't cache failures so the next explore gets a fresh attempt.
+    // All retries exhausted — don't permanently cache so next explore retries.
     return null;
   })();
 
@@ -141,9 +141,7 @@ async function writeChildrenToIndex(parentId, allChildren) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ parentId, children: allChildren }),
     });
-  } catch {
-    // Non-fatal.
-  }
+  } catch {}
 }
 
 async function findChildrenByScan(parentId, cache, setStatus) {
@@ -163,7 +161,6 @@ async function findChildrenByScan(parentId, cache, setStatus) {
   setStatus(`Scanning #${normalizedParentId} offspring... 0% (0 found)`);
   let completed = 0;
 
-  // Run chunks through a concurrency limiter so we don't fire them all at once.
   await Promise.all(chunks.map(async ([start, end]) => {
     await acquireChunkSlot();
     try {
