@@ -40,6 +40,14 @@ async function explore(id) {
     const selectedDepth = Number.parseInt(elements.depthSelect.value, 10);
     const ancestorDepth = selectedDepth;
 
+    // Keep the input and URL in sync so the current search is bookmarkable
+    // and shareable — also ensures the form always shows what's being viewed.
+    elements.searchInput.value = normalizedId;
+    const params = new URLSearchParams();
+    params.set('depth', selectedDepth);
+    params.set('chickenId', normalizedId);
+    history.replaceState(null, '', `?${params.toString()}`);
+
     status.show(`Loading #${normalizedId}...`);
     const rootData = await fetchChicken(normalizedId, store.cache);
     const rootChicken = parseChickenData(rootData, normalizedId);
@@ -69,9 +77,9 @@ async function explore(id) {
     }
 
     if (ancTree && ancTree.parents.length > 0) {
-      const validParents = ancTree.parents.filter((parent) => parent && !parent.chicken.unknown);
-      validParents.forEach((parent, index) => {
-        const offset = (index - (validParents.length - 1) / 2) * ((NODE_WIDTH * 2) + HORIZONTAL_GAP);
+      const rootParents = ancTree.parents.filter(Boolean);
+      rootParents.forEach((parent, index) => {
+        const offset = (index - (rootParents.length - 1) / 2) * ((NODE_WIDTH * 2) + HORIZONTAL_GAP);
         layoutAncestors(parent, offset, rootY - NODE_HEIGHT - VERTICAL_GAP, positions);
       });
     }
@@ -102,6 +110,23 @@ async function explore(id) {
   }
 }
 
+// Read depth and chickenId from the URL on page load so bookmarks and
+// shared links auto-populate the form and trigger the exploration.
+function initFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const depth = params.get('depth');
+  const chickenId = params.get('chickenId');
+
+  if (depth) {
+    elements.depthSelect.value = depth;
+  }
+
+  if (chickenId) {
+    elements.searchInput.value = chickenId;
+    explore(chickenId);
+  }
+}
+
 panelController = createInfoPanelController(elements, explore);
 
 elements.searchForm.addEventListener('submit', (event) => {
@@ -110,3 +135,4 @@ elements.searchForm.addEventListener('submit', (event) => {
 });
 
 window.explore = explore;
+initFromUrl();
