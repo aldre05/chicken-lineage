@@ -2,7 +2,7 @@ import { BATCH_CHUNK_SIZE } from '../config/constants.js';
 
 let cachedScanEnd = null;
 let cachedScanEndTime = 0;
-const SCAN_END_TTL_MS = 5 * 60 * 1000; // re-fetch every 5 minutes
+const SCAN_END_TTL_MS = 5 * 60 * 1000;
 
 async function getScanEnd() {
   const now = Date.now();
@@ -21,30 +21,57 @@ async function getScanEnd() {
   return 25000;
 }
 
-// Concurrency limiter — prevents hammering chicken-api-ivory with hundreds
-// of simultaneous requests (deep ancestor trees trigger recursive Promise.all).
-// Only MAX_CONCURRENT fetches run at once; the rest wait in a queue.
-const MAX_CONCURRENT = 12;
-let _running = 0;
-const _waitQueue = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function acquireSlot() {
-  if (_running < MAX_CONCURRENT) {
-    _running++;
+// ---------------------------------------------------------------------------
+// Polite concurrency limiter for individual chicken fetches (ancestor tree).
+// Keeps concurrent requests low so we don't flood chicken-api-ivory.
+// ---------------------------------------------------------------------------
+const MAX_FETCH_CONCURRENT = 5;
+let _fetchRunning = 0;
+const _fetchQueue = [];
+
+function acquireFetchSlot() {
+  if (_fetchRunning < MAX_FETCH_CONCURRENT) {
+    _fetchRunning++;
     return Promise.resolve();
   }
-  return new Promise((resolve) => _waitQueue.push(resolve));
+  return new Promise((resolve) => _fetchQueue.push(resolve));
 }
 
-function releaseSlot() {
-  _running--;
-  if (_waitQueue.length > 0) {
-    _running++;
-    _waitQueue.shift()();
+function releaseFetchSlot() {
+  _fetchRunning--;
+  if (_fetchQueue.length > 0) {
+    _fetchRunning++;
+    _fetchQueue.shift()();
   }
 }
 
-// In-flight deduplication — concurrent callers for the same ID share one request.
+// ---------------------------------------------------------------------------
+// Polite concurrency limiter for batch chunk requests (descendant scan).
+// Caps how many /api/batch calls run at once so the server isn't slammed.
+// ---------------------------------------------------------------------------
+const MAX_CHUNK_CONCURRENT = 4;
+let _chunkRunning = 0;
+const _chunkQueue = [];
+
+function acquireChunkSlot() {
+  if (_chunkRunning < MAX_CHUNK_CONCURRENT) {
+    _chunkRunning++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => _chunkQueue.push(resolve));
+}
+
+function releaseChunkSlot() {
+  _chunkRunning--;
+  if (_chunkQueue.length > 0) {
+    _chunkRunning++;
+    _chunkQueue.shift()();
+  }
+}
+
+// In-flight deduplication — concurrent callers for the same ID share one fetch.
 const inFlight = new Map();
 
 export async function fetchChicken(id, cache) {
@@ -53,15 +80,12 @@ export async function fetchChicken(id, cache) {
   if (inFlight.has(key)) return inFlight.get(key);
 
   const promise = (async () => {
-    // Retry up to 3 times — rate-limited or timed-out requests often
-    // succeed on a second attempt once the queue drains a little.
+    // Up to 3 attempts with increasing back-off between retries.
     for (let attempt = 0; attempt < 3; attempt++) {
-      await acquireSlot();
+      await acquireFetchSlot();
       try {
         if (attempt > 0) {
-          // Brief back-off before retrying so we don't immediately hit the
-          // same bottleneck again.
-          await new Promise((r) => setTimeout(r, attempt * 400));
+          await sleep(attempt * 500);
         }
         const response = await fetch(`https://chicken-api-ivory.vercel.app/api/${key}`);
         if (response.ok) {
@@ -69,19 +93,19 @@ export async function fetchChicken(id, cache) {
           cache.set(key, data);
           return data;
         }
-        // 404 means chicken genuinely doesn't exist — no point retrying.
+        // 404 = chicken doesn't exist, no point retrying.
         if (response.status === 404) {
           cache.set(key, null);
           return null;
         }
-        // Any other non-OK (429 rate limit, 5xx) — retry.
+        // 429 / 5xx — back off and retry.
       } catch {
         // Network error — retry.
       } finally {
-        releaseSlot();
+        releaseFetchSlot();
       }
     }
-    // All retries exhausted — don't permanently cache so next explore can retry.
+    // Don't cache failures so the next explore gets a fresh attempt.
     return null;
   })();
 
@@ -98,7 +122,6 @@ async function findChildrenFromIndex(parentId, cache) {
     const { children, indexed } = await r.json();
     if (!indexed) return null;
 
-    // Warm the client-side cache with the full raw data returned from index.
     for (const child of children) {
       const childId = String(child.token_id || child.id || (child.metadata && child.metadata.token_id));
       if (childId) cache.set(childId, child);
@@ -111,10 +134,6 @@ async function findChildrenFromIndex(parentId, cache) {
   }
 }
 
-// Write all discovered children into the index ONCE after the full scan
-// completes — never partial, so the index is always complete or absent.
-// Always called even for empty results so a sentinel gets written and
-// future lookups don't fall back to a full scan unnecessarily.
 async function writeChildrenToIndex(parentId, allChildren) {
   try {
     await fetch('/api/index-children', {
@@ -123,7 +142,7 @@ async function writeChildrenToIndex(parentId, allChildren) {
       body: JSON.stringify({ parentId, children: allChildren }),
     });
   } catch {
-    // Non-fatal — next scan will just re-index.
+    // Non-fatal.
   }
 }
 
@@ -144,7 +163,9 @@ async function findChildrenByScan(parentId, cache, setStatus) {
   setStatus(`Scanning #${normalizedParentId} offspring... 0% (0 found)`);
   let completed = 0;
 
+  // Run chunks through a concurrency limiter so we don't fire them all at once.
   await Promise.all(chunks.map(async ([start, end]) => {
+    await acquireChunkSlot();
     try {
       const response = await fetch(
         `/api/batch?parent=${encodeURIComponent(normalizedParentId)}&start=${start}&end=${end}`
@@ -161,8 +182,9 @@ async function findChildrenByScan(parentId, cache, setStatus) {
         allRaw.push(child);
       }
     } catch {
-      // Ignore failed chunks and keep scanning.
+      // Ignore failed chunks.
     } finally {
+      releaseChunkSlot();
       completed += 1;
       const pct = Math.round((completed / chunks.length) * 100);
       setStatus(`Scanning #${normalizedParentId} offspring... ${pct}% (${found.length} found)`);
