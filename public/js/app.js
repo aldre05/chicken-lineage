@@ -40,8 +40,8 @@ async function explore(id) {
     const selectedDepth = Number.parseInt(elements.depthSelect.value, 10);
     const ancestorDepth = selectedDepth;
 
-    // Keep the input and URL in sync so the current search is bookmarkable
-    // and shareable — also ensures the form always shows what's being viewed.
+    // Keep the input field and URL in sync so the search is always
+    // bookmarkable and shareable.
     elements.searchInput.value = normalizedId;
     const params = new URLSearchParams();
     params.set('depth', selectedDepth);
@@ -114,16 +114,23 @@ async function explore(id) {
 // shared links auto-populate the form and trigger the exploration.
 function initFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const depth = params.get('depth');
+  const depthParam = params.get('depth');
   const chickenId = params.get('chickenId');
 
-  if (depth) {
-    elements.depthSelect.value = depth;
+  if (depthParam) {
+    const depthNum = parseInt(depthParam, 10);
+    if (!isNaN(depthNum) && depthNum > 0) {
+      // Clamp to the range available in the select (1–30).
+      const options = Array.from(elements.depthSelect.options).map((o) => parseInt(o.value, 10));
+      const max = Math.max(...options);
+      const min = Math.min(...options);
+      elements.depthSelect.value = String(Math.min(max, Math.max(min, depthNum)));
+    }
   }
 
-  if (chickenId) {
-    elements.searchInput.value = chickenId;
-    explore(chickenId);
+  if (chickenId && chickenId.trim()) {
+    elements.searchInput.value = chickenId.trim();
+    explore(chickenId.trim());
   }
 }
 
