@@ -87,7 +87,7 @@ export async function fetchChicken(id, cache) {
 
       await acquireFetchSlot();
       try {
-        const response = await fetch(`https://chicken-api-ivory.vercel.app/api/${key}`);
+        const response = await fetch(`/api/chicken?id=${encodeURIComponent(key)}`);
         if (response.ok) {
           const data = await response.json();
           cache.set(key, data);
