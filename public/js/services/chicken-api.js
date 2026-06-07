@@ -115,6 +115,16 @@ export async function fetchChicken(id, cache) {
 }
 
 // Try the parent index first — single DB query, instant if already scanned.
+// Only cache data that has attributes — stale/stripped entries (empty
+// attributes) are left out so fetchChicken falls through to /api/chicken
+// which re-fetches fresh complete data from upstream.
+function isDataComplete(data) {
+  if (!data) return false;
+  const src = data.metadata || data;
+  const attrs = src.attributes || data.attributes || [];
+  return attrs.length > 0;
+}
+
 async function findChildrenFromIndex(parentId, cache) {
   try {
     const r = await fetch(`/api/children?parent=${encodeURIComponent(parentId)}`);
@@ -124,7 +134,7 @@ async function findChildrenFromIndex(parentId, cache) {
 
     for (const child of children) {
       const childId = String(child.token_id || child.id || (child.metadata && child.metadata.token_id));
-      if (childId) cache.set(childId, child);
+      if (childId && isDataComplete(child)) cache.set(childId, child);
     }
     return children.map((child) =>
       String(child.token_id || child.id || (child.metadata && child.metadata.token_id))
@@ -174,7 +184,7 @@ async function findChildrenByScan(parentId, cache, setStatus) {
         const src = child.metadata || child;
         const childId = String(src.token_id || src.id || child.token_id);
         if (!childId || childId === 'undefined') continue;
-        cache.set(childId, child);
+        if (isDataComplete(child)) cache.set(childId, child);
         found.push(childId);
         allRaw.push(child);
       }
