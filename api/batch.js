@@ -3,8 +3,8 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
 // Polite fetching: process uncached IDs in small groups with a pause between
 // each group so we don't hammer chicken-api-ivory all at once.
-const FETCH_GROUP_SIZE = 25;
-const FETCH_GROUP_DELAY_MS = 60;
+const FETCH_GROUP_SIZE = 50;
+const FETCH_GROUP_DELAY_MS = 30;
 
 async function dbGet(ids) {
   const res = await fetch(
