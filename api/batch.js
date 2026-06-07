@@ -1,8 +1,6 @@
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
-// Polite fetching: process uncached IDs in small groups with a pause between
-// each group so we don't hammer chicken-api-ivory all at once.
 const FETCH_GROUP_SIZE = 50;
 const FETCH_GROUP_DELAY_MS = 30;
 
@@ -14,6 +12,7 @@ async function dbGet(ids) {
   if (!res.ok) return {};
   const rows = await res.json();
   const map = {};
+  // null means we already know this ID doesn't exist — skip it.
   for (const row of rows) map[row.id] = row.data;
   return map;
 }
@@ -28,11 +27,7 @@ async function dbSet(entries) {
       'Content-Type': 'application/json',
       Prefer: 'resolution=merge-duplicates',
     },
-    body: JSON.stringify(entries.map(e => ({
-      id: e.id,
-      data: e.data,
-      updated_at: new Date().toISOString(),
-    }))),
+    body: JSON.stringify(entries),
   });
 }
 
@@ -50,11 +45,13 @@ module.exports = async function handler(req, res) {
   const endId    = parseInt(end, 10) || (startId + 499);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => String(startId + i));
 
-  // Step 1: Supabase cache lookup
+  // Step 1: Supabase cache — includes nulls (known non-existent IDs).
   const cached = await dbGet(ids).catch(() => ({}));
-  const missing = ids.filter(id => !cached[id]);
 
-  // Step 2: Fetch uncached IDs in small polite groups
+  // IDs not in Supabase at all (never fetched).
+  const missing = ids.filter(id => !(id in cached));
+
+  // Step 2: Fetch uncached IDs in polite groups.
   const fresh = {};
   const toStore = [];
 
@@ -63,32 +60,45 @@ module.exports = async function handler(req, res) {
     const results = await Promise.allSettled(group.map(async (id) => {
       try {
         const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
+        if (r.status === 404) {
+          // Store null so we never request this ID again.
+          return { id, data: null, exists: false };
+        }
         if (!r.ok) return null;
         const data = await r.json();
-        return { id, data };
+        return { id, data, exists: true };
       } catch { return null; }
     }));
 
     for (const r of results) {
       if (r.status === 'fulfilled' && r.value) {
-        fresh[r.value.id] = r.value.data;
-        toStore.push(r.value);
+        const { id, data, exists } = r.value;
+        fresh[id] = data;
+        toStore.push({
+          id,
+          data,
+          updated_at: new Date().toISOString(),
+        });
+        // exists=false means null data — stored to prevent future re-requests.
+        if (exists) {
+          // Also track in fresh map for parent matching below.
+        }
       }
     }
 
-    // Pause between groups — lets other players' requests through
     if (i + FETCH_GROUP_SIZE < missing.length) {
       await sleep(FETCH_GROUP_DELAY_MS);
     }
   }
 
-  // Step 3: Save newly fetched chickens to Supabase
+  // Step 3: Write to Supabase (including nulls for 404s).
   await dbSet(toStore).catch(() => {});
 
-  // Step 4: Filter for children of this parent — return full raw payload
+  // Step 4: Filter for children of this parent — return full raw payload.
   const children = [];
   for (const id of ids) {
-    const raw = cached[id] || fresh[id];
+    // Skip nulls (known non-existent) and IDs not found.
+    const raw = (id in cached ? cached[id] : fresh[id]);
     if (!raw) continue;
     const data = raw.metadata || raw;
     const attrs = data.attributes || raw.attributes || [];
