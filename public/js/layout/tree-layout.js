@@ -3,110 +3,124 @@ import {
   NODE_HEIGHT,
   NODE_WIDTH,
   VERTICAL_GAP,
-} from './config/constants.js';
-import { buildAncestorTree, buildDescendantTree } from './data/tree-builder.js';
-import { buildEdges, layoutAncestors, layoutDescendants, shiftPositions } from './layout/tree-layout.js';
-import { renderGraph } from './render/graph-renderer.js';
-import { fetchChicken } from './services/chicken-api.js';
-import { createInfoPanelController } from './ui/panel.js';
-import { createStatusController } from './ui/status.js';
-import { createViewportController } from './ui/viewport.js';
-import { parseChickenData } from './utils/chicken-parser.js';
-import { getAppElements } from './utils/dom.js';
+} from '../config/constants.js';
 
-const elements = getAppElements();
-const status = createStatusController(elements);
-const viewport = createViewportController(elements);
-const store = {
-  cache: new Map(),
-};
+function descendantSubtreeWidth(node) {
+  if (!node || node.chicken.unknown) {
+    return NODE_WIDTH;
+  }
 
-let panelController;
+  const validChildren = node.children.filter((child) => child && !child.chicken.unknown);
 
-async function explore(id) {
-  const normalizedId = String(id).trim();
-  let keepStatusVisible = false;
+  if (validChildren.length === 0) {
+    return NODE_WIDTH;
+  }
 
-  if (!normalizedId) {
+  const totalWidth = validChildren.reduce(
+    (sum, child) => sum + descendantSubtreeWidth(child) + HORIZONTAL_GAP,
+    -HORIZONTAL_GAP,
+  );
+
+  return Math.max(NODE_WIDTH, totalWidth);
+}
+
+function ancestorSubtreeWidth(node) {
+  // Unknown nodes are leaf nodes — they have no parents to spread out.
+  if (!node || !node.parents.length) {
+    return NODE_WIDTH;
+  }
+
+  const totalWidth = node.parents.reduce(
+    (sum, parent) => sum + ancestorSubtreeWidth(parent) + HORIZONTAL_GAP,
+    -HORIZONTAL_GAP,
+  );
+
+  return Math.max(NODE_WIDTH, totalWidth);
+}
+
+export function layoutDescendants(node, centerX, positionY, role, positions) {
+  if (!node || node.chicken.unknown) {
     return;
   }
 
-  panelController.close();
-  elements.searchButton.disabled = true;
-  elements.scene.innerHTML = '';
-  elements.connectors.innerHTML = '';
+  const leftX = centerX - NODE_WIDTH / 2;
+  positions.push({ chicken: node.chicken, x: leftX, y: positionY, role });
 
-  try {
-    const selectedDepth = Number.parseInt(elements.depthSelect.value, 10);
-    const ancestorDepth = selectedDepth;
+  const validChildren = node.children.filter((child) => child && !child.chicken.unknown);
+  const childWidths = validChildren.map(descendantSubtreeWidth);
+  const totalWidth = childWidths.reduce((sum, width) => sum + width + HORIZONTAL_GAP, -HORIZONTAL_GAP);
 
-    status.show(`Loading #${normalizedId}...`);
-    const rootData = await fetchChicken(normalizedId, store.cache);
-    const rootChicken = parseChickenData(rootData, normalizedId);
-    const hasParents = rootChicken.parent1 !== '0' || rootChicken.parent2 !== '0';
-    const rootY = hasParents ? ancestorDepth * (NODE_HEIGHT + VERTICAL_GAP) + 40 : 40;
+  let currentX = centerX - (totalWidth > 0 ? totalWidth / 2 : 0);
 
-    status.show(`Finding descendants of #${normalizedId}...`);
-    const descTree = await buildDescendantTree(normalizedId, 0, selectedDepth, {
-      cache: store.cache,
-      setStatus: (message) => status.show(message),
-    });
-
-    status.show(`Finding ancestors of #${normalizedId}...`);
-    const ancTree = await buildAncestorTree(normalizedId, 0, ancestorDepth, {
-      cache: store.cache,
-      setStatus: (message) => status.show(message),
-    });
-
-    const positions = [];
-
-    if (descTree) {
-      layoutDescendants(descTree, 0, rootY, 'root', positions);
-    }
-
-    if (positions[0]) {
-      positions[0].role = 'root';
-    }
-
-    if (ancTree && ancTree.parents.length > 0) {
-      const rootParents = ancTree.parents.filter(Boolean);
-      rootParents.forEach((parent, index) => {
-        const offset = (index - (rootParents.length - 1) / 2) * ((NODE_WIDTH * 2) + HORIZONTAL_GAP);
-        layoutAncestors(parent, offset, rootY - NODE_HEIGHT - VERTICAL_GAP, positions);
-      });
-    }
-
-    shiftPositions(positions, 60);
-    const edges = buildEdges(positions);
-
-    renderGraph({
-      elements,
-      positions,
-      edges,
-      onNodeClick: (chicken) => panelController.open(chicken),
-      centerOnRoot: (x, y) => viewport.centerOn(x, y),
-    });
-  } catch (error) {
-    console.error('Failed to explore lineage', error);
-    keepStatusVisible = true;
-    status.show('Failed to load lineage data. Please try again.');
-    window.setTimeout(() => status.hide(), 2500);
-  } finally {
-    if (!keepStatusVisible) {
-      status.hide();
-    }
-
-    if (elements.searchButton.disabled) {
-      elements.searchButton.disabled = false;
-    }
-  }
+  validChildren.forEach((child, index) => {
+    const childCenterX = currentX + childWidths[index] / 2;
+    layoutDescendants(child, childCenterX, positionY + NODE_HEIGHT + VERTICAL_GAP, 'descendant', positions);
+    currentX += childWidths[index] + HORIZONTAL_GAP;
+  });
 }
 
-panelController = createInfoPanelController(elements, explore);
+export function layoutAncestors(node, centerX, positionY, positions) {
+  if (!node) {
+    return;
+  }
 
-elements.searchForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  explore(elements.searchInput.value);
-});
+  const leftX = centerX - NODE_WIDTH / 2;
+  positions.push({ chicken: node.chicken, x: leftX, y: positionY, role: 'ancestor' });
 
-window.explore = explore;
+  // Unknown nodes (failed fetches) are shown as placeholders but have no
+  // parents to recurse into — keeps tree structure visible instead of hiding
+  // entire branches when individual fetches fail.
+  if (!node.parents.length) {
+    return;
+  }
+
+  const parentWidths = node.parents.map(ancestorSubtreeWidth);
+  const totalWidth = parentWidths.reduce((sum, width) => sum + width + HORIZONTAL_GAP, -HORIZONTAL_GAP);
+
+  let currentX = centerX - (totalWidth > 0 ? totalWidth / 2 : 0);
+
+  node.parents.forEach((parent, index) => {
+    const parentCenterX = currentX + parentWidths[index] / 2;
+    layoutAncestors(parent, parentCenterX, positionY - NODE_HEIGHT - VERTICAL_GAP, positions);
+    currentX += parentWidths[index] + HORIZONTAL_GAP;
+  });
+}
+
+export function shiftPositions(positions, padding) {
+  const minimumX = positions.length > 0 ? Math.min(...positions.map((position) => position.x)) : padding;
+  const offsetX = padding - minimumX;
+
+  positions.forEach((position) => {
+    position.x += offsetX;
+  });
+}
+
+export function buildEdges(positions) {
+  const positionMap = new Map(
+    positions.filter((position) => !position.chicken.unknown).map((position) => [position.chicken.id, position]),
+  );
+
+  const edges = [];
+
+  positions.forEach((position) => {
+    const chicken = position.chicken;
+
+    if (chicken.unknown) {
+      return;
+    }
+
+    [chicken.parent1, chicken.parent2].forEach((parentId) => {
+      if (parentId && parentId !== '0' && positionMap.has(parentId)) {
+        const parentPosition = positionMap.get(parentId);
+        edges.push({
+          x1: parentPosition.x + NODE_WIDTH / 2,
+          y1: parentPosition.y + NODE_HEIGHT,
+          x2: position.x + NODE_WIDTH / 2,
+          y2: position.y,
+        });
+      }
+    });
+  });
+
+  return edges;
+}
