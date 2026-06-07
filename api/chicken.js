@@ -1,10 +1,14 @@
-// Single-chicken proxy with Supabase cache + Vercel CDN caching.
-// Routes ancestor fetches through here instead of hitting chicken-api-ivory
-// directly from the browser — CDN caches responses for 5 min so repeat
-// explores don't touch the rate-limited upstream at all.
-
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
+// A stored record is considered stale/incomplete if it has no attributes
+// (old stripped format from the previous chicken.js version).
+function isComplete(data) {
+  if (!data) return false;
+  const src = data.metadata || data;
+  const attrs = src.attributes || data.attributes || [];
+  return attrs.length > 0;
+}
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,7 +18,7 @@ module.exports = async function handler(req, res) {
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'Missing id' });
 
-  // 1. Check Supabase cache first — avoids hitting upstream entirely.
+  // 1. Check Supabase cache — only use it if the data looks complete.
   try {
     const dbRes = await fetch(
       `${SUPABASE_URL}/rest/v1/chickens?id=eq.${encodeURIComponent(id)}&select=data&limit=1`,
@@ -22,20 +26,20 @@ module.exports = async function handler(req, res) {
     );
     if (dbRes.ok) {
       const rows = await dbRes.json();
-      if (Array.isArray(rows) && rows.length > 0 && rows[0].data) {
+      if (Array.isArray(rows) && rows.length > 0 && isComplete(rows[0].data)) {
         res.setHeader('Cache-Control', 's-maxage=300');
         return res.status(200).json(rows[0].data);
       }
     }
   } catch (_) {}
 
-  // 2. Fetch from upstream.
+  // 2. Fetch from upstream (stale, missing, or Supabase unreachable).
   try {
     const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
     if (!r.ok) return res.status(r.status).json({ error: 'Not found' });
     const data = await r.json();
 
-    // 3. Store in Supabase for future use.
+    // 3. Write complete data back to Supabase so future hits skip upstream.
     try {
       await fetch(`${SUPABASE_URL}/rest/v1/chickens`, {
         method: 'POST',
