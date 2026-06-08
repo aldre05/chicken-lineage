@@ -1,7 +1,8 @@
 {
   "functions": {
-    "api/batch.js":    { "maxDuration": 60 },
-    "api/chicken.js":  { "maxDuration": 10 },
-    "api/children.js": { "maxDuration": 10 }
+    "api/batch.js":         { "maxDuration": 60 },
+    "api/chicken.js":       { "maxDuration": 10 },
+    "api/children.js":      { "maxDuration": 10 },
+    "api/index-children.js": { "maxDuration": 15 }
   }
 }
