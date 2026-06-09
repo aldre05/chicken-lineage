@@ -1,13 +1,14 @@
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
-// A stored record is considered stale/incomplete if it has no attributes
-// (old stripped format from the previous chicken.js version).
+// Complete data has both a real image URL AND attributes.
+// Old stripped format (from previous chicken.js) had image='' and attributes=[].
 function isComplete(data) {
   if (!data) return false;
   const src = data.metadata || data;
+  const image = src.image || data.image || '';
   const attrs = src.attributes || data.attributes || [];
-  return attrs.length > 0;
+  return image.length > 0 && attrs.length > 0;
 }
 
 module.exports = async function handler(req, res) {
@@ -18,7 +19,7 @@ module.exports = async function handler(req, res) {
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'Missing id' });
 
-  // 1. Check Supabase cache — only use it if the data looks complete.
+  // 1. Check Supabase — only trust it if data looks complete.
   try {
     const dbRes = await fetch(
       `${SUPABASE_URL}/rest/v1/chickens?id=eq.${encodeURIComponent(id)}&select=data&limit=1`,
@@ -33,13 +34,13 @@ module.exports = async function handler(req, res) {
     }
   } catch (_) {}
 
-  // 2. Fetch from upstream (stale, missing, or Supabase unreachable).
+  // 2. Fetch fresh from upstream.
   try {
     const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
     if (!r.ok) return res.status(r.status).json({ error: 'Not found' });
     const data = await r.json();
 
-    // 3. Write complete data back to Supabase so future hits skip upstream.
+    // 3. Write complete data back to Supabase.
     try {
       await fetch(`${SUPABASE_URL}/rest/v1/chickens`, {
         method: 'POST',
