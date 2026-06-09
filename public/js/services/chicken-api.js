@@ -121,8 +121,10 @@ export async function fetchChicken(id, cache) {
 function isDataComplete(data) {
   if (!data) return false;
   const src = data.metadata || data;
+  const image = src.image || data.image || '';
   const attrs = src.attributes || data.attributes || [];
-  return attrs.length > 0;
+  // Old stripped format had image="" and attributes=[] — both must be present
+  return image.length > 0 && attrs.length > 0;
 }
 
 async function findChildrenFromIndex(parentId, cache) {
