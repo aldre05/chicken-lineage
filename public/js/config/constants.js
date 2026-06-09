@@ -5,7 +5,7 @@ export const VERTICAL_GAP = 56;
 export const BATCH_CHUNK_SIZE = 100;
 export const BATCH_PARALLEL_REQUESTS = 6;
 export const MAX_ANCESTOR_DEPTH = 30;
-export const MAX_BREED_COUNT = 3;
+export const MAX_BREED_COUNT = 10;
 
 export const ROLE_COLORS = {
   root: '#f5a623',
