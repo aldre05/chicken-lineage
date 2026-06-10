@@ -44,7 +44,7 @@ module.exports = async function handler(req, res) {
         body: JSON.stringify([{
           parent_id: parentId,
           child_id: '__none__',
-          child_data: null,
+          child_data: {},
           indexed_at: new Date().toISOString(),
         }]),
       });
