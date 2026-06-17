@@ -60,9 +60,8 @@ module.exports = async function handler(req, res) {
     const results = await Promise.allSettled(group.map(async (id) => {
       try {
         const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
-        if (r.status === 404) {
-          // Store null so we never request this ID again.
-          return { id, data: null, exists: false };
+        if (r.status === 404) { // Do not store null — temporary 404s from rate limits would block real chickens
+          return null; // Skip — will be re-fetched next scan
         }
         if (!r.ok) return null;
         const data = await r.json();
