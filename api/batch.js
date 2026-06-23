@@ -1,8 +1,26 @@
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
+const CONTRACT = '0x322b3d98ddbd589dc2e8dd83659bb069828231e0';
+const SKYMAVIS_KEY = process.env.SKYMAVIS_API_KEY || 'l62lam6Dt5AyU7zO6H7fK0Czz58bcPYq';
+
 const FETCH_GROUP_SIZE = 50;
 const FETCH_GROUP_DELAY_MS = 30;
+
+async function fetchFromSkyMavis(id) {
+  try {
+    const r = await fetch(
+      `https://api-gateway.skymavis.com/skynet/ronin/web3/v2/collections/${CONTRACT}/tokens/${id}`,
+      { headers: { 'X-API-Key': SKYMAVIS_KEY } }
+    );
+    if (!r.ok) return null;
+    const json = await r.json();
+    const item = json?.result?.token ?? json?.result ?? json;
+    return item?.metadata ?? item ?? null;
+  } catch {
+    return null;
+  }
+}
 
 async function dbGet(ids) {
   const res = await fetch(
@@ -12,7 +30,6 @@ async function dbGet(ids) {
   if (!res.ok) return {};
   const rows = await res.json();
   const map = {};
-  // null means we already know this ID doesn't exist — skip it.
   for (const row of rows) map[row.id] = row.data;
   return map;
 }
@@ -42,16 +59,14 @@ module.exports = async function handler(req, res) {
 
   const parentId = String(parent);
   const startId  = parseInt(start, 10) || 1;
-  const endId    = parseInt(end, 10) || (startId + 499);
+  const endId    = parseInt(end, 10) || (startId + 99);
   const ids      = Array.from({ length: endId - startId + 1 }, (_, i) => String(startId + i));
 
-  // Step 1: Supabase cache — includes nulls (known non-existent IDs).
+  // Step 1: Supabase cache
   const cached = await dbGet(ids).catch(() => ({}));
-
-  // IDs not in Supabase at all (never fetched).
   const missing = ids.filter(id => !(id in cached));
 
-  // Step 2: Fetch uncached IDs in polite groups.
+  // Step 2: Fetch missing IDs in polite groups — Sky Mavis fallback for rate limits
   const fresh = {};
   const toStore = [];
 
@@ -60,28 +75,25 @@ module.exports = async function handler(req, res) {
     const results = await Promise.allSettled(group.map(async (id) => {
       try {
         const r = await fetch(`https://chicken-api-ivory.vercel.app/api/${id}`);
-        if (r.status === 404) { // Do not store null — temporary 404s from rate limits would block real chickens
-          return null; // Skip — will be re-fetched next scan
+        if (r.status === 404) return null;
+        if (r.ok) {
+          const data = await r.json();
+          return { id, data };
         }
-        if (!r.ok) return null;
-        const data = await r.json();
-        return { id, data, exists: true };
-      } catch { return null; }
+        // Rate limited or server error — try Sky Mavis directly
+        const skyData = await fetchFromSkyMavis(id);
+        if (skyData) return { id, data: skyData };
+        return null;
+      } catch {
+        return null;
+      }
     }));
 
     for (const r of results) {
       if (r.status === 'fulfilled' && r.value) {
-        const { id, data, exists } = r.value;
+        const { id, data } = r.value;
         fresh[id] = data;
-        toStore.push({
-          id,
-          data,
-          updated_at: new Date().toISOString(),
-        });
-        // exists=false means null data — stored to prevent future re-requests.
-        if (exists) {
-          // Also track in fresh map for parent matching below.
-        }
+        toStore.push({ id, data, updated_at: new Date().toISOString() });
       }
     }
 
@@ -90,13 +102,12 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // Step 3: Write to Supabase (including nulls for 404s).
+  // Step 3: Save to Supabase
   await dbSet(toStore).catch(() => {});
 
-  // Step 4: Filter for children of this parent — return full raw payload.
+  // Step 4: Parent match — return full raw payload
   const children = [];
   for (const id of ids) {
-    // Skip nulls (known non-existent) and IDs not found.
     const raw = (id in cached ? cached[id] : fresh[id]);
     if (!raw) continue;
     const data = raw.metadata || raw;
@@ -108,10 +119,5 @@ module.exports = async function handler(req, res) {
   }
 
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({
-    children,
-    scanned: ids.length,
-    fromCache: ids.length - missing.length,
-    fromApi: missing.length,
-  });
+  return res.status(200).json({ children, scanned: ids.length });
 };
