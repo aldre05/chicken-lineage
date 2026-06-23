@@ -156,21 +156,55 @@ async function writeChildrenToIndex(parentId, allChildren) {
   } catch {}
 }
 
+async function findChildrenInDB(parentId, cache) {
+  try {
+    const r = await fetch(`/api/db-children?parent=${encodeURIComponent(parentId)}`);
+    if (!r.ok) return [];
+    const { children } = await r.json();
+    if (!Array.isArray(children)) return [];
+    const ids = [];
+    for (const child of children) {
+      const src = child.metadata || child;
+      const childId = String(src.token_id || src.id || child.token_id);
+      if (childId && childId !== 'undefined') {
+        if (isDataComplete(child)) cache.set(childId, child);
+        ids.push(childId);
+      }
+    }
+    return ids;
+  } catch {
+    return [];
+  }
+}
+
 async function findChildrenByScan(parentId, cache, setStatus) {
   const normalizedParentId = String(parentId);
-  const found = [];
-  const allRaw = [];
+
+  // Fast pass: query Supabase directly for known children already in the DB.
+  // Finds descendants even when chicken-api-ivory is rate-limited.
+  const dbFound = await findChildrenInDB(normalizedParentId, cache);
+  if (dbFound.length > 0) {
+    setStatus(`Found ${dbFound.length} known children of #${normalizedParentId} in DB, scanning for new ones...`);
+  }
+
+  const found = [...dbFound];
+  const foundSet = new Set(dbFound);
+  const allRaw = dbFound.map(id => cache.get(id)).filter(Boolean);
+
   const scanStart = Number.parseInt(normalizedParentId, 10) + 1;
   const scanEnd = await getScanEnd();
 
-  if (Number.isNaN(scanStart) || scanStart > scanEnd) return found;
+  if (Number.isNaN(scanStart) || scanStart > scanEnd) {
+    writeChildrenToIndex(normalizedParentId, allRaw);
+    return found;
+  }
 
   const chunks = [];
   for (let start = scanStart; start <= scanEnd; start += BATCH_CHUNK_SIZE) {
     chunks.push([start, Math.min(start + BATCH_CHUNK_SIZE - 1, scanEnd)]);
   }
 
-  setStatus(`Scanning #${normalizedParentId} offspring... 0% (0 found)`);
+  setStatus(`Scanning #${normalizedParentId} offspring... 0% (${found.length} found)`);
   let completed = 0;
 
   await Promise.all(chunks.map(async ([start, end]) => {
@@ -185,9 +219,10 @@ async function findChildrenByScan(parentId, cache, setStatus) {
       for (const child of data.children || []) {
         const src = child.metadata || child;
         const childId = String(src.token_id || src.id || child.token_id);
-        if (!childId || childId === 'undefined') continue;
+        if (!childId || childId === 'undefined' || foundSet.has(childId)) continue;
         if (isDataComplete(child)) cache.set(childId, child);
         found.push(childId);
+        foundSet.add(childId);
         allRaw.push(child);
       }
     } catch {
