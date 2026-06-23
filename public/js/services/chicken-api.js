@@ -206,6 +206,7 @@ async function findChildrenByScan(parentId, cache, setStatus) {
 
   setStatus(`Scanning #${normalizedParentId} offspring... 0% (${found.length} found)`);
   let completed = 0;
+  let failedChunks = 0;
 
   await Promise.all(chunks.map(async ([start, end]) => {
     await acquireChunkSlot();
@@ -213,7 +214,10 @@ async function findChildrenByScan(parentId, cache, setStatus) {
       const response = await fetch(
         `/api/batch?parent=${encodeURIComponent(normalizedParentId)}&start=${start}&end=${end}`
       );
-      if (!response.ok) return;
+      if (!response.ok) {
+        failedChunks += 1;
+        return;
+      }
       const data = await response.json();
 
       for (const child of data.children || []) {
@@ -226,7 +230,7 @@ async function findChildrenByScan(parentId, cache, setStatus) {
         allRaw.push(child);
       }
     } catch {
-      // Ignore failed chunks.
+      failedChunks += 1;
     } finally {
       releaseChunkSlot();
       completed += 1;
@@ -235,7 +239,14 @@ async function findChildrenByScan(parentId, cache, setStatus) {
     }
   }));
 
-  writeChildrenToIndex(normalizedParentId, allRaw);
+  // Only index if the scan fully completed — don't write a sentinel
+  // if chunks failed (rate limits, timeouts) or we'd permanently mark
+  // a parent as childless when it actually has descendants.
+  if (failedChunks === 0) {
+    writeChildrenToIndex(normalizedParentId, allRaw);
+  } else {
+    console.warn(`[chicken-lineage] Scan for #${normalizedParentId} had ${failedChunks} failed chunks — skipping index write`);
+  }
   return found;
 }
 
