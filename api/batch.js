@@ -114,7 +114,7 @@ module.exports = async function handler(req, res) {
     const attrs = data.attributes || raw.attributes || [];
     const getA = name => String((attrs.find(a => a.trait_type === name) || {}).value || '0');
     if (getA('Parent 1') === parentId || getA('Parent 2') === parentId) {
-      children.push(raw);
+      children.push({ ...raw, token_id: id });
     }
   }
 
