@@ -146,12 +146,12 @@ async function findChildrenFromIndex(parentId, cache) {
   }
 }
 
-async function writeChildrenToIndex(parentId, allChildren) {
+async function writeChildrenToIndex(parentId, allChildren, { skipSentinel = false } = {}) {
   try {
     await fetch('/api/index-children', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parentId, children: allChildren }),
+      body: JSON.stringify({ parentId, children: allChildren, skipSentinel }),
     });
   } catch {}
 }
@@ -243,9 +243,15 @@ async function findChildrenByScan(parentId, cache, setStatus) {
   // if chunks failed (rate limits, timeouts) or we'd permanently mark
   // a parent as childless when it actually has descendants.
   if (failedChunks === 0) {
+    // Full scan succeeded — index everything including childless sentinel
     writeChildrenToIndex(normalizedParentId, allRaw);
+  } else if (allRaw.length > 0) {
+    // Partial scan — index what we found but skip the sentinel so
+    // the next search re-scans and may find more children
+    console.warn(`[chicken-lineage] Partial scan for #${normalizedParentId}: ${failedChunks} failed chunks, writing ${allRaw.length} found children without sentinel`);
+    writeChildrenToIndex(normalizedParentId, allRaw, { skipSentinel: true });
   } else {
-    console.warn(`[chicken-lineage] Scan for #${normalizedParentId} had ${failedChunks} failed chunks — skipping index write`);
+    console.warn(`[chicken-lineage] Scan for #${normalizedParentId} had ${failedChunks} failed chunks and found nothing — skipping index write`);
   }
   return found;
 }
