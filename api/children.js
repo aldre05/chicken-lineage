@@ -15,7 +15,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/parent_index?parent_id=eq.${encodeURIComponent(parent)}&select=child_id,child_data`,
+      `${SUPABASE_URL}/rest/v1/parent_index?parent_id=eq.${encodeURIComponent(parent)}&select=child_id,child_data,indexed_at`,
       {
         headers: {
           apikey: SUPABASE_KEY,
@@ -33,8 +33,16 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ children: [], indexed: false });
     }
 
-    // Sentinel row means parent was scanned and genuinely has no children.
+    // Sentinel row means parent was scanned and had no children at that time.
+    // Expire after 7 days so newly bred chickens get discovered on next scan.
     if (rows.length === 1 && rows[0].child_id === '__none__') {
+      const indexedAt = rows[0].indexed_at ? new Date(rows[0].indexed_at) : null;
+      const ageMs = indexedAt ? Date.now() - indexedAt.getTime() : Infinity;
+      const SENTINEL_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+      if (ageMs > SENTINEL_TTL_MS) {
+        // Expired — tell client to re-scan (may have offspring now after breeding)
+        return res.status(200).json({ children: [], indexed: false });
+      }
       return res.status(200).json({ children: [], indexed: true });
     }
 
