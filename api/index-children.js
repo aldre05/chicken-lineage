@@ -33,7 +33,7 @@ module.exports = async function handler(req, res) {
 
     // If the parent genuinely has no children, mark it as indexed-but-empty
     // using a sentinel row so future lookups don't fall back to a scan.
-    if (children.length === 0) {
+    if (children.length === 0 && !skipSentinel) {
       await fetch(`${SUPABASE_URL}/rest/v1/parent_index`, {
         method: 'POST',
         headers: {
