@@ -1,6 +1,6 @@
-﻿# Chicken Saga Lineage Explorer
+# Chicken Saga Lineage Explorer
 
-Chicken Saga Lineage Explorer is a lightweight web application for exploring the family tree of a Chicken Saga NFT. The project is built as a static single-page interface backed by Vercel serverless functions that proxy and aggregate metadata from external APIs.
+Chicken Saga Lineage Explorer is a lightweight web application for exploring the family tree of a Chicken Saga NFT. The project is built as a static single-page interface backed by Vercel serverless functions that proxy and aggregate metadata from external APIs, with a Supabase-backed persistence layer for caching metadata and descendant indexes.
 
 ## Specification Source of Truth
 
@@ -9,6 +9,7 @@ Behavioral requirements for this project are defined in OpenSpec under `openspec
 - `openspec/specs/lineage-exploration/spec.md`
 - `openspec/specs/graph-visualization/spec.md`
 - `openspec/specs/metadata-access/spec.md`
+- `openspec/specs/descendant-indexing/spec.md`
 - `openspec/specs/diagnostic-endpoints/spec.md`
 
 Future behavior changes should be proposed as OpenSpec changes before they are treated as part of the baseline.
@@ -23,20 +24,19 @@ The application lets a user enter a chicken ID and visualize:
 - Relationship lines between parents and offspring
 - Detailed stats and metadata for each discovered chicken
 
-The project favors a very small deployment footprint:
+The project favors a small deployment footprint:
 
 - No frontend framework
 - No bundler
-- No local database
 - No internal state management library
-- No runtime dependencies declared in `package.json`
+- Supabase used only as a caching/indexing layer, not as an internal data model
 
 ## Technology Stack
 
 ### Frontend
 
 - HTML5
-- Vanilla JavaScript
+- Vanilla JavaScript (ES modules under `public/js/`)
 - CSS3
 - SVG for relationship connectors
 - Google Fonts (`Cinzel`, `Crimson Pro`)
@@ -48,6 +48,13 @@ The project favors a very small deployment footprint:
 - Native `fetch` API for upstream requests
 - Vercel Function configuration through `vercel.json`
 
+### Persistence
+
+- Supabase (Postgres) used as a caching and indexing layer:
+  - `chickens` table — persistent cache of fetched, normalized metadata
+  - `parent_index` table — persistent index of parent → children relationships
+  - RPC functions `find_chickens_by_parent` and `get_max_chicken_id` for fast lookups
+
 ### External Data Sources
 
 The app depends on third-party Chicken Saga metadata providers:
@@ -58,22 +65,23 @@ The app depends on third-party Chicken Saga metadata providers:
 
 ## Architecture
 
-The system follows a thin-client plus serverless-proxy architecture.
+The system follows a thin-client plus serverless-proxy architecture, with a persistence layer sitting in front of upstream providers.
 
 ```text
-Browser SPA (public/index.html)
+Browser SPA (public/js/app.js)
   |
-  |-- Direct metadata reads for individual chickens
-  |     -> chicken-api-ivory.vercel.app
+  |-- Individual chicken metadata
+  |     -> /api/chicken
+  |        -> Supabase `chickens` cache (if complete + has innate stats)
+  |        -> chicken-api-ivory.vercel.app
+  |        -> Sky Mavis API (fallback)
   |
-  |-- Descendant range scans
-  |     -> /api/batch
-  |        -> chicken-api-ivory.vercel.app (multiple token lookups)
-  |
-  |-- Optional internal metadata proxy
-        -> /api/chicken
-           -> Chicken Saga proxy
-           -> fallback to Sky Mavis API
+  |-- Descendant discovery
+  |     -> /api/children      (check parent_index; instant if already indexed)
+  |     -> /api/db-children   (fast DB-only lookup, before a full scan)
+  |     -> /api/batch         (chunked range scan against upstream + Supabase)
+  |     -> /api/index-children (persist scan results back to parent_index)
+  |     -> /api/max-id        (dynamic scan upper bound)
 ```
 
 ### Frontend responsibilities
@@ -82,7 +90,8 @@ The browser client is responsible for:
 
 - Collecting the target chicken ID and requested exploration depth
 - Fetching metadata for the root, ancestors, and descendants
-- Caching already-fetched chickens in memory
+- Caching already-fetched chickens in memory for the session
+- Rate-limiting concurrent fetches and batch-scan requests client-side
 - Building two trees: ancestor tree and descendant tree
 - Calculating layout positions for every node
 - Rendering cards and SVG connectors
@@ -90,35 +99,50 @@ The browser client is responsible for:
 
 ### Backend responsibilities
 
-The serverless layer is intentionally small and serves two main purposes:
+The serverless layer:
 
-- Work around CORS and availability issues when fetching Chicken Saga metadata
-- Batch-scan token ID ranges to discover descendants by matching `Parent 1` / `Parent 2`
+- Works around CORS and availability issues when fetching Chicken Saga metadata
+- Maintains a persistent Supabase cache of metadata and parent/child relationships
+- Batch-scans token ID ranges to discover descendants by matching `Parent 1` / `Parent 2`, only when they aren't already indexed
 
 ### Deployment model
 
 The repo is designed for Vercel deployment:
 
-- `public/index.html` acts as the client entry point
+- `public/index.html` + `public/js/` act as the client entry point
 - `api/*.js` are deployed as serverless endpoints
-- `vercel.json` increases the function timeout for the heavier batch scanner
+- `vercel.json` configures per-function timeouts, with the batch scanner given the most headroom
+- Supabase project provides the `chickens` and `parent_index` tables plus RPC functions, configured via `SUPABASE_URL` / `SUPABASE_KEY` environment variables
 
 ## Repository Structure
 
 ```text
 .
 |-- api/
-|   |-- batch.js     # Descendant discovery by scanning token ranges
-|   |-- chicken.js   # Metadata proxy with fallback strategy
-|   |-- debug.js     # Diagnostic endpoint for upstream API inspection
-|   `-- test.js      # Diagnostic endpoint for parent-child validation
+|   |-- batch.js          # Descendant discovery by scanning token ranges
+|   |-- chicken.js        # Metadata proxy with Supabase cache + fallback strategy
+|   |-- children.js       # Reads known children from the parent_index
+|   |-- db-children.js    # Fast DB-only child lookup via RPC
+|   |-- index-children.js # Persists scan results to parent_index
+|   |-- max-id.js         # Dynamic descendant scan upper bound
+|   |-- debug.js          # Diagnostic endpoint for upstream API inspection
+|   `-- test.js           # Diagnostic endpoint for parent-child validation
 |-- openspec/
-|   |-- specs/       # Normative project requirements and capabilities
-|   `-- changes/     # Proposed spec changes before they are merged
+|   |-- specs/            # Normative project requirements and capabilities
+|   `-- changes/          # Proposed spec changes before they are merged
 |-- public/
-|   `-- index.html   # Entire frontend UI, styling, rendering, and client logic
-|-- package.json     # Minimal project metadata
-`-- vercel.json      # Serverless function timeout configuration
+|   |-- index.html        # App shell and markup
+|   `-- js/                # Frontend logic, organized by concern
+|       |-- app.js            # Explore flow orchestration
+|       |-- config/           # Layout and rendering constants
+|       |-- data/             # Ancestor/descendant tree building
+|       |-- layout/           # Node positioning and edge computation
+|       |-- render/           # Graph rendering
+|       |-- services/         # chicken-api.js — fetching, caching, indexing
+|       |-- ui/                # Panel, status, viewport controllers
+|       `-- utils/            # Parsing and DOM helpers
+|-- package.json          # Minimal project metadata
+`-- vercel.json           # Serverless function timeout configuration
 ```
 
 ## Implemented Features
@@ -135,17 +159,17 @@ The UI supports depth levels from 2 to 5. Descendant traversal uses the selected
 
 The client reads `Parent 1` and `Parent 2` attributes recursively and places ancestors above the selected chicken.
 
-### 4. Descendant discovery
+### 4. Descendant discovery with persistent indexing
 
-The app discovers descendants by scanning token IDs greater than the current parent and checking whether either parent attribute matches the selected chicken ID.
+The app discovers descendants by first checking a persistent parent-index cache; if a parent hasn't been indexed yet, it scans token IDs greater than the current parent, checking whether either parent attribute matches, and then persists the results for future lookups.
 
 ### 5. Chunked batch scanning
 
-To reduce the number of browser-originated requests, descendant discovery is delegated to `/api/batch`, which scans ID ranges in chunks of 500 and processes up to 4 chunks in parallel from the browser workflow.
+When a full scan is needed, it's delegated to `/api/batch`, which scans ID ranges in chunks (default 100 per chunk) with client-side concurrency limits to stay polite to upstream providers.
 
-### 6. In-memory client cache
+### 6. Two-tier caching (in-memory + persistent)
 
-A `Map` cache stores fetched chickens to avoid repeated metadata requests during a session.
+A `Map` cache stores fetched chickens in memory for the current session, backed by a persistent Supabase cache shared across all users and sessions.
 
 ### 7. Relationship graph rendering
 
@@ -203,7 +227,7 @@ The interface includes:
 
 ### 15. Metadata fallback strategy
 
-`/api/chicken` first tries the Chicken Saga proxy and then falls back to the Sky Mavis API if needed.
+`/api/chicken` checks the persistent cache first, then tries the Chicken Saga proxy, then falls back to the Sky Mavis API if needed.
 
 ### 16. Diagnostic endpoints
 
@@ -217,9 +241,9 @@ The project includes two helper endpoints used during integration/debugging:
 ### Explore flow
 
 1. The user enters a chicken ID and chooses a depth.
-2. The client fetches the root chicken metadata.
-3. The client recursively builds the descendant tree.
-4. During descendant discovery, the client calls `/api/batch` for chunked scans.
+2. The client fetches the root chicken metadata (persistent cache → proxy → Sky Mavis).
+3. The client recursively builds the descendant tree, checking the parent index before scanning.
+4. If a parent isn't indexed, the client calls `/api/batch` for chunked scans and persists results via `/api/index-children`.
 5. The client recursively builds the ancestor tree.
 6. Layout functions compute horizontal subtree widths and node positions.
 7. The UI renders nodes and connectors.
@@ -245,7 +269,7 @@ The client normalizes upstream payloads into a simplified internal shape contain
 Purpose:
 
 - Returns lightweight metadata for a single chicken
-- Handles CORS-sensitive upstream access from the server side
+- Checks the persistent Supabase cache first, then handles CORS-sensitive upstream access from the server side
 - Falls back between providers
 
 Behavior:
@@ -268,6 +292,33 @@ Behavior:
 - Returns `{ children, scanned }`
 - Disables caching with `Cache-Control: no-store`
 
+### `GET /api/children?parent=<id>`
+
+Purpose:
+
+- Returns all known children of a parent from the persistent `parent_index`
+- Returns `indexed: false` if the parent hasn't been scanned yet, so the caller falls back to a scan
+
+### `GET /api/db-children?parent=<id>`
+
+Purpose:
+
+- Fast first-pass lookup of known children directly from the `chickens` table via RPC, avoiding a full range scan for already-cached data
+
+### `POST /api/index-children`
+
+Purpose:
+
+- Persists descendant scan results to the `parent_index` table after a scan completes
+- Does not write a sentinel for zero-result scans, so childless chickens are re-checked on future explorations
+
+### `GET /api/max-id`
+
+Purpose:
+
+- Determines the dynamic upper bound for descendant range scanning
+- Tries an RPC, then a direct table query, then a hardcoded floor (25000) as a last resort
+
 ### `GET /api/test`
 
 Purpose:
@@ -288,28 +339,27 @@ The manifest is intentionally minimal and currently only contains project metada
 
 ### `vercel.json`
 
-The Vercel config customizes serverless execution time:
+The Vercel config customizes serverless execution time per function, reflecting that descendant scanning and indexing are the heaviest operations in the system.
 
-- `api/batch.js`: `maxDuration = 60`
-- `api/chicken.js`: `maxDuration = 10`
+### Environment Variables
 
-This reflects the fact that descendant scanning is the slowest operation in the system.
+- `SUPABASE_URL` / `SUPABASE_KEY` — required for the persistent cache and parent index
+- `SKYMAVIS_API_KEY` — optional; falls back to an embedded default if unset
 
 ## Design Characteristics
 
 ### Strengths
 
-- Extremely small codebase
+- Small, modular codebase
 - Simple deployment model
 - No build step required
-- Clear separation between visualization logic and proxy/batch serverless functions
-- Works without a database because lineage is reconstructed from NFT metadata
+- Clear separation between visualization logic, proxy/batch serverless functions, and the persistence layer
+- Descendant re-scans are avoided once a parent is indexed, significantly reducing repeated upstream load
 
 ### Current constraints
 
-- The frontend currently fetches individual chicken metadata directly from `chicken-api-ivory.vercel.app` instead of using the local `/api/chicken` endpoint for the main flow
-- Descendant discovery relies on range scanning, which can become expensive as the token space grows
-- There are embedded upstream constants and API credentials in serverless files instead of environment variables
+- The frontend fetches individual chicken metadata directly from `chicken-api-ivory.vercel.app` in some paths instead of exclusively using the local `/api/chicken` endpoint
+- There is an embedded fallback API credential in serverless files instead of relying solely on environment variables
 - There is no automated test suite
 - There are no local development scripts documented in the repo
 - D3 is loaded but not meaningfully used by the current rendering implementation
@@ -320,9 +370,9 @@ Because the project has no build system, the simplest way to run it is through a
 
 Typical local options:
 
-- Use `vercel dev` to serve both `public/` and `api/`
+- Use `vercel dev` to serve both `public/` and `api/` (requires `SUPABASE_URL` and `SUPABASE_KEY` in your local env)
 - Or serve `public/index.html` statically and deploy/use the `api/` folder through Vercel-compatible tooling
 
 ## Summary
 
-This project is a compact lineage visualization tool for Chicken Saga NFTs. Its architecture combines a single-file browser client with Vercel serverless endpoints that proxy metadata and perform descendant batch scans. The main implemented value is the ability to navigate a chicken's ancestry and offspring interactively, inspect metadata, and explore the graph recursively without any heavy application framework or persistent backend.
+This project is a compact lineage visualization tool for Chicken Saga NFTs. Its architecture combines a modular browser client with Vercel serverless endpoints that proxy metadata, perform descendant batch scans, and persist results in Supabase to minimize repeated upstream load. The main implemented value is the ability to navigate a chicken's ancestry and offspring interactively, inspect metadata, and explore the graph recursively without any heavy application framework.
