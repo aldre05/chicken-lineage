@@ -17,6 +17,13 @@ The system SHALL maintain an in-memory cache of fetched chicken records during a
 - **WHEN** a chicken already fetched in the current session is needed again
 - **THEN** the system reuses the cached record instead of requiring a duplicate fetch for that session
 
+### Requirement: System maintains a persistent metadata cache across sessions
+The system SHALL persist fetched chicken metadata in a Supabase-backed store, separate from the client's in-memory session cache, so metadata already retrieved by any user can be reused without re-fetching from upstream providers.
+
+#### Scenario: Reuse across sessions
+- **WHEN** a chicken's metadata has already been persisted from a prior request by any client
+- **THEN** subsequent requests for that chicken can be served from the persistent cache instead of requiring a fresh upstream fetch
+
 ### Requirement: System normalizes upstream metadata into a shared internal shape
 The system SHALL normalize upstream payloads into a common internal representation including identity fields, parent references, descriptive attributes, combat stats, computed innate points, image URL, and an unknown fallback state.
 
@@ -32,11 +39,19 @@ The system SHALL use `/api/batch` to scan token ID ranges for descendants by mat
 - **THEN** the system calls `/api/batch` to evaluate token ranges and return matching children
 
 ### Requirement: Metadata proxy uses a documented fallback strategy
-The system SHALL have `/api/chicken` try the Chicken Saga proxy first and fall back to the Sky Mavis token API when needed.
+The system SHALL have `/api/chicken` check a persistent Supabase cache first, trusting only entries that are complete (have an image and attributes) and include innate stats; otherwise it SHALL try the Chicken Saga proxy, and fall back to the Sky Mavis token API when the proxy result is missing or lacks innate stats.
+
+#### Scenario: Serve from persistent cache
+- **WHEN** `/api/chicken` finds a complete, stats-bearing record for the requested ID in the Supabase cache
+- **THEN** the system returns that cached record without contacting upstream providers
 
 #### Scenario: Fallback after primary provider failure
-- **WHEN** `/api/chicken` cannot satisfy a request from the primary Chicken Saga proxy
+- **WHEN** `/api/chicken` cannot satisfy a request from the primary Chicken Saga proxy, or the result lacks innate stats
 - **THEN** it retries using the Sky Mavis API before returning failure to the client
+
+#### Scenario: Persist newly fetched metadata
+- **WHEN** `/api/chicken` retrieves metadata from an upstream provider
+- **THEN** the system writes that record to the persistent Supabase cache for future requests
 
 ### Requirement: Batch endpoint validates inputs and returns scan results
 The system SHALL return a client error when the required `parent` parameter is missing and SHALL otherwise return the discovered children and scanned count for the requested range.
@@ -48,4 +63,3 @@ The system SHALL return a client error when the required `parent` parameter is m
 #### Scenario: Successful batch scan response
 - **WHEN** `/api/batch` receives a valid parent and scan range
 - **THEN** the endpoint returns a payload containing `children` and `scanned`
-
