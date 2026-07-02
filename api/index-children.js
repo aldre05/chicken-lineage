@@ -1,9 +1,10 @@
 // POST /api/index-children
 // Body: { parentId: string, children: RawChickenData[] }
 //
-// Called once after a full scan completes — writes the complete child list
-// for a parent into parent_index. Never called with partial data, so the
-// index is always either absent or complete.
+// Called after a full scan completes — writes found children to parent_index.
+// If children is empty, does nothing (no sentinel written). This means
+// childless chickens are re-scanned on every search, which is intentional —
+// they may get offspring at any time from breeding.
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -18,8 +19,14 @@ module.exports = async function handler(req, res) {
   if (!parentId) return res.status(400).json({ error: 'Missing parentId' });
   if (!Array.isArray(children)) return res.status(400).json({ error: 'children must be an array' });
 
+  // Nothing to write — don't mark as childless, just return.
+  // Next search will re-scan and may find newly bred offspring.
+  if (children.length === 0) {
+    return res.status(200).json({ indexed: 0 });
+  }
+
   try {
-    // First delete any stale rows for this parent so we always have a clean write.
+    // Delete stale rows for this parent first so we always have a clean write.
     await fetch(
       `${SUPABASE_URL}/rest/v1/parent_index?parent_id=eq.${encodeURIComponent(parentId)}`,
       {
@@ -31,26 +38,6 @@ module.exports = async function handler(req, res) {
       }
     );
 
-    // If the parent genuinely has no children, mark it as indexed-but-empty
-    // using a sentinel row so future lookups don't fall back to a scan.
-    if (children.length === 0 && !skipSentinel) {
-      await fetch(`${SUPABASE_URL}/rest/v1/parent_index`, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify([{
-          parent_id: parentId,
-          child_id: '__none__',
-          child_data: {},
-          indexed_at: new Date().toISOString(),
-        }]),
-      });
-      return res.status(200).json({ indexed: 0 });
-    }
-
     // Write all children in one upsert.
     const rows = children.map((child) => {
       const src = child.metadata || child;
@@ -58,7 +45,7 @@ module.exports = async function handler(req, res) {
       return {
         parent_id: parentId,
         child_id: childId,
-        child_data: child,   // full raw payload preserved
+        child_data: child,
         indexed_at: new Date().toISOString(),
       };
     });
