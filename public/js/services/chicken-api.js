@@ -49,7 +49,7 @@ function releaseFetchSlot() {
 // ---------------------------------------------------------------------------
 // Polite concurrency limiter for batch chunk requests (descendant scan).
 // ---------------------------------------------------------------------------
-const MAX_CHUNK_CONCURRENT = 4;
+const MAX_CHUNK_CONCURRENT = 10;
 let _chunkRunning = 0;
 const _chunkQueue = [];
 
