@@ -115,24 +115,16 @@ export async function fetchChicken(id, cache) {
 }
 
 // Try the parent index first — single DB query, instant if already scanned.
-// Only cache data that is fully hatched with innate stats.
-// Egg-state data (no innate stats) is excluded so fetchChicken falls
-// through to /api/chicken which re-fetches fresh data from Sky Mavis.
-// This ensures chickens that hatched since caching show updated stats.
-function hasInnateStats(data) {
-  const src = data.metadata || data;
-  const attrs = src.attributes || data.attributes || [];
-  return attrs.some(
-    (a) => typeof a.trait_type === 'string' && a.trait_type.toLowerCase().startsWith('innate')
-  );
-}
-
+// Data is complete when it has a real image URL and non-empty attributes.
+// We do NOT require innate stats here — eggs are valid cached data even
+// without stats. The server-side /api/chicken handles Sky Mavis fallback
+// for stale data separately.
 function isDataComplete(data) {
   if (!data) return false;
   const src = data.metadata || data;
   const image = src.image || data.image || '';
   const attrs = src.attributes || data.attributes || [];
-  return image.length > 0 && attrs.length > 0 && hasInnateStats(data);
+  return image.length > 0 && attrs.length > 0;
 }
 
 async function findChildrenFromIndex(parentId, cache) {
