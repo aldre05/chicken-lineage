@@ -53,17 +53,17 @@ async function explore(id) {
     const hasParents = rootChicken.parent1 !== '0' || rootChicken.parent2 !== '0';
     const rootY = hasParents ? ancestorDepth * (NODE_HEIGHT + VERTICAL_GAP) + 40 : 40;
 
-    status.show(`Finding descendants of #${normalizedId}...`);
-    const descTree = await buildDescendantTree(normalizedId, 0, selectedDepth, {
-      cache: store.cache,
-      setStatus: (message) => status.show(message),
-    });
-
-    status.show(`Finding ancestors of #${normalizedId}...`);
-    const ancTree = await buildAncestorTree(normalizedId, 0, ancestorDepth, {
-      cache: store.cache,
-      setStatus: (message) => status.show(message),
-    });
+    status.show(`Finding descendants and ancestors of #${normalizedId}...`);
+    const [descTree, ancTree] = await Promise.all([
+      buildDescendantTree(normalizedId, 0, selectedDepth, {
+        cache: store.cache,
+        setStatus: (message) => status.show(message),
+      }),
+      buildAncestorTree(normalizedId, 0, ancestorDepth, {
+        cache: store.cache,
+        setStatus: (message) => status.show(message),
+      }),
+    ]);
 
     const positions = [];
 
