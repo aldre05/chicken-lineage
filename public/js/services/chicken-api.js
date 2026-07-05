@@ -167,21 +167,24 @@ async function writeChildrenToIndex(parentId, allChildren) {
 async function findChildrenInDB(parentId, cache) {
   try {
     const r = await fetch(`/api/db-children?parent=${encodeURIComponent(parentId)}`);
-    if (!r.ok) return [];
+    if (!r.ok) return { ids: [], raw: [] };
     const { children } = await r.json();
-    if (!Array.isArray(children)) return [];
+    if (!Array.isArray(children)) return { ids: [], raw: [] };
     const ids = [];
+    const raw = [];
     for (const child of children) {
       const src = child.metadata || child;
       const childId = String(src.token_id || src.id || child.token_id);
       if (childId && childId !== 'undefined') {
+        // Only cache fully hatched chickens — eggs re-fetch fresh on next access
         if (isDataComplete(child)) cache.set(childId, child);
         ids.push(childId);
+        raw.push(child); // always keep raw regardless of egg state
       }
     }
-    return ids;
+    return { ids, raw };
   } catch {
-    return [];
+    return { ids: [], raw: [] };
   }
 }
 
@@ -190,14 +193,14 @@ async function findChildrenByScan(parentId, cache, setStatus) {
 
   // Fast pass: query Supabase directly for known children already in the DB.
   // Finds descendants even when chicken-api-ivory is rate-limited.
-  const dbFound = await findChildrenInDB(normalizedParentId, cache);
+  const { ids: dbFound, raw: dbRaw } = await findChildrenInDB(normalizedParentId, cache);
   if (dbFound.length > 0) {
     setStatus(`Found ${dbFound.length} known children of #${normalizedParentId} in DB, scanning for new ones...`);
   }
 
   const found = [...dbFound];
   const foundSet = new Set(dbFound);
-  const allRaw = dbFound.map(id => cache.get(id)).filter(Boolean);
+  const allRaw = [...dbRaw]; // use raw objects directly — don't reconstruct from cache (eggs won't be there)
 
   const scanStart = Number.parseInt(normalizedParentId, 10) + 1;
   const scanEnd = await getScanEnd();
