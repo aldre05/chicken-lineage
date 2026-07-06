@@ -129,9 +129,10 @@ export async function fetchChicken(id, cache) {
           cache.set(key, data);
           return data;
         }
-        // 404 = chicken genuinely doesn't exist, no point retrying.
+        // 404 = upstream couldn't find this chicken right now.
+        // Don't cache null — rate limits may have caused a false 404,
+        // so let the next exploration retry instead of permanently blocking.
         if (response.status === 404) {
-          cache.set(key, null);
           return null;
         }
         // 429 / 5xx — release slot and retry after back-off.
