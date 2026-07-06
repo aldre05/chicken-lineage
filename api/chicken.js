@@ -84,7 +84,9 @@ module.exports = async function handler(req, res) {
   }
 
   if (!data) {
-    return res.status(404).json({ error: 'Not found' });
+    // Return 503 instead of 404 — upstream may be rate-limited, not truly missing.
+    // Client will not cache this and will retry on the next exploration.
+    return res.status(503).json({ error: 'Upstream unavailable, please retry' });
   }
 
   // 4. Write best available data to Supabase.
