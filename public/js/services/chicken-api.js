@@ -96,7 +96,16 @@ export async function fetchChicken(id, cache) {
     // If this is a hatched chicken (has Body) but missing innate stats,
     // the cached data is stale — bypass and re-fetch so /api/chicken
     // can fall back to Sky Mavis for current innate stats.
-    if (cached && hasBody(cached) && !hasInnateStats(cached)) {
+    // Bypass stale cache in two cases:
+    // 1. Hatched chicken (has Body) but missing innate stats — stale data
+    // 2. Stripped record (< 10 attrs, no Body) — old format missing most data
+    const src = cached ? (cached.metadata || cached) : null;
+    const attrs = src ? (src.attributes || cached.attributes || []) : [];
+    const isStale = cached && (
+      (hasBody(cached) && !hasInnateStats(cached)) ||
+      (attrs.length > 0 && attrs.length < 10 && !hasInnateStats(cached))
+    );
+    if (isStale) {
       cache.delete(key);
     } else {
       return cached;
