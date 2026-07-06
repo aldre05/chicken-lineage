@@ -72,9 +72,36 @@ function releaseChunkSlot() {
 // In-flight deduplication — concurrent callers for the same ID share one fetch.
 const inFlight = new Map();
 
+function hasInnateStats(data) {
+  if (!data) return false;
+  const src = data.metadata || data;
+  const attrs = src.attributes || data.attributes || [];
+  return attrs.some(
+    (a) => typeof a.trait_type === 'string' && a.trait_type.toLowerCase().startsWith('innate')
+  );
+}
+
+function hasBody(data) {
+  if (!data) return false;
+  const src = data.metadata || data;
+  const attrs = src.attributes || data.attributes || [];
+  const body = attrs.find((a) => a.trait_type === 'Body');
+  return body && body.value && body.value !== '';
+}
+
 export async function fetchChicken(id, cache) {
   const key = String(id);
-  if (cache.has(key)) return cache.get(key);
+  if (cache.has(key)) {
+    const cached = cache.get(key);
+    // If this is a hatched chicken (has Body) but missing innate stats,
+    // the cached data is stale — bypass and re-fetch so /api/chicken
+    // can fall back to Sky Mavis for current innate stats.
+    if (cached && hasBody(cached) && !hasInnateStats(cached)) {
+      cache.delete(key);
+    } else {
+      return cached;
+    }
+  }
   if (inFlight.has(key)) return inFlight.get(key);
 
   const promise = (async () => {
